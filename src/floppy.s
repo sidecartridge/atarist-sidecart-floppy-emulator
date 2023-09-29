@@ -621,7 +621,7 @@ _wait_sync_for_token:
     swap d7
     dbf d7, _wait_sync_for_token_a_lot
 _sync_token_not_found:
-    moveq.w #-1, d0                     ; Timeout
+    moveq #-1, d0                     ; Timeout
     rts
 _sync_token_found:
     clr.w d0                            ; Clear the error code
