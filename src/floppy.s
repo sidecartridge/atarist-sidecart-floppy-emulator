@@ -802,7 +802,13 @@ floppy_emulator_msg:
         dc.b	"SidecarT Floppy Emulator - "
         
 version:
-        dc.b    "v0.0.1",$d,$a
+        dc.b    "v"
+        dc.b    VERSION_MAJOR
+        dc.b    "."
+        dc.b    VERSION_MINOR
+        dc.b    "."
+        dc.b    VERSION_PATCH
+        dc.b    $d,$a
 
 spacing:
         dc.b    "+" ,$d,$a,0
