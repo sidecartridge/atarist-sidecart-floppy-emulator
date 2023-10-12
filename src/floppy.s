@@ -389,7 +389,7 @@ _do_emulated_write:
 ;  d0: logical sector number to start the transfer
 ;  d1: number of sectors to read/write
 ;  d2: sector size in bytes
-;  d3: rwflag for read/write
+;  d4: rwflag for read/write
 ;  a0: buffer address in the computer memory
 ; Output registers:
 ;  none
@@ -398,25 +398,43 @@ do_transfer_sidecart:
     bne write_sidecart          ; if not, write
 read_sidecart:
     move.l a0, a1
-    bsr read_sectors_from_sidecart
-write_sidecart:  
-    rts
+    bra read_sectors_from_sidecart
+write_sidecart:
+    move.l a0, a4
+    bra write_sectors_from_sidecart  
 
 ; Read sectors from the sidecart
 ; Input registers:
 ;  d0: logical sector number to start the transfer
-;  d1: number of sectors to read/write
+;  d1: number of sectors to read
 ;  d2: sector size in bytes
-;  a0: address in the computer memory to write
+;  a0: address in the computer memory to store the data
 ; Output registers:
 ;  d0: error code, 0 if no error
-;  a1: next address in the computer memory to write
+;  a1: next address in the computer memory to store the data
 read_sectors_from_sidecart:
     subq.w #1,d1                ; one less
 _sectors_to_read:
     bsr read_sector_from_sidecart
     addq #1,d0
     dbf d1, _sectors_to_read
+    rts
+
+; Write sectors from the sidecart
+; Input registers:
+;  d0: logical sector number to start the transfer
+;  d1: number of sectors to write
+;  d2: sector size in bytes
+;  a4: address in the computer memory to retrieve the data
+; Output registers:
+;  d0: error code, 0 if no error
+;  a4: next address in the computer memory to retrieve the data
+write_sectors_from_sidecart:
+    subq.w #1,d1                ; one less
+_sectors_to_write:
+    bsr write_sector_to_sidecart
+    addq #1,d0
+    dbf d1, _sectors_to_write
     rts
 
 ; Read a sector from the sidecart
@@ -426,7 +444,7 @@ _sectors_to_read:
 ;  a0: address in the computer memory to write
 ; Output registers:
 ;  d0: error code, 0 if no error
-;  a1: next address in the computer memory to write
+;  a1: next address in the computer memory to store
 read_sector_from_sidecart:
     ; Implement the code to read a sector from the sidecart
     movem.w d0-d3, -(sp)                ; Save the number of sectors to read
@@ -452,6 +470,37 @@ _copy_sector_byte:
 _error_reading_sector:
     movem.w (sp)+, d0-d3           ; Recover the number of sectors to read
     rts
+
+; Write a sector to the sidecart
+; Input registers:
+;  d0: logical sector number to start the transfer
+;  d2: sector size in bytes
+;  a4: address in the computer memory to write
+; Output registers:
+;  d0: error code, 0 if no error
+;  a4: next address in the computer memory to retrieve
+write_sector_to_sidecart:
+    ; Implement the code to write a sector to the sidecart
+    movem.w d0-d3, -(sp)                ; Save the number of sectors to read
+    move.w d2, d4                       ; Save in d4 the number of bytes to copy
+    move.w d0,d3                        ; Payload is the logical sector number
+    swap d3
+    move.w d2,d3                        ; Payload is the sector size
+    move.w #CMD_WRITE_SECTOR,d0         ; Command code WRITE_SECTOR
+    move.w d2, d1
+    addq.w #4,d1                        ; Payload size is 4 bytes (d3.l) + the sector buffer size to transfer
+
+    bsr send_sync_write_command_to_sidecart   ; Call the sync command to read a sector
+    tst.w d0
+    bne.s _error_writing_sector
+
+    clr.w d0                       ; Clear the error code
+_error_writing_sector:
+    movem.w (sp)+, d0-d3           ; Recover the number of sectors to read
+    rts
+
+
+
 
 ; Send an async command to the Sidecart
 ; Fire and forget style
@@ -631,6 +680,123 @@ _sync_token_found:
 _end_sync_code_in_stack:
 
     rts
+
+; Send an sync write command to the Sidecart
+; Wait until the command sets a response in the memory with a random number used as a token
+; Input registers:
+; d0.w: command code
+; d1.w: payload size
+; d3.l: size sector and logical sector number
+; a4: address of the buffer to write in the sidecart
+; Output registers:
+; d0: error code, 0 if no error
+; a4: next address in the computer memory to retrieve
+; d1-d7 are modified. a0-a3 modified.
+send_sync_write_command_to_sidecart:
+    move.l #_end_sync_write_code_in_stack - _start_sync_write_code_in_stack, d7
+    lea -(_end_sync_write_code_in_stack - _start_sync_write_code_in_stack)(sp), sp
+    move.l sp, a2
+    move.l sp, a3
+    lea _start_sync_write_code_in_stack, a1    ; a1 points to the start of the code in ROM
+    lsr.w #2, d7
+    subq #1, d7
+_copy_write_sync_code:
+    move.l (a1)+, (a2)+
+    dbf d7, _copy_write_sync_code
+    move.w #$4e71, (_no_async_write_return - _start_sync_write_code_in_stack)(a3)   ; Put a NOP when sync
+    jsr (a3)                                                            ; Jump to the code in the stack
+    lea (_end_sync_write_code_in_stack - _start_sync_write_code_in_stack)(sp), sp
+    rts
+
+_start_sync_write_code_in_stack:
+    ; The sync write command synchronize with a random token
+    move.l random_token_seed,d2
+    mulu  #221,d2
+    add.b #53, d2                       ; Save the random number in d2
+    addq.w #4, d1                       ; Add 4 bytes to the payload size to include the token
+
+_start_async_write_code_in_stack:
+    move.l #ROM3_START_ADDR, a0 ; Start address of the ROM3
+
+    ; SEND HEADER WITH MAGIC NUMBER
+    swap d0                     ; Save the command code in the high word of d0         
+    move.b CMD_MAGIC_NUMBER, d0; Command header. d0 is a scratch register
+
+    ; SEND COMMAND CODE
+    swap d0                     ; Recover the command code
+    move.l a0, a1               ; Address of the ROM3
+    add.w d0, a1                ; We can use add because the command code msb is 0 and there is no sign extension            
+    move.b (a1), d0             ; Command code. d0 is a scratch register
+
+    ; SEND PAYLOAD SIZE
+    move.l a0, d0               ; Address of the ROM3 in d0    
+    or.w d1, d0                 ; OR high and low words in d0
+    move.l d0, a1               ; move to a1 ready to read from this address
+    move.b (a1), d0             ; Command payload size. d0 is a scratch register
+
+    ; SEND PAYLOAD
+    move.l a0, d0
+    or.w d2, d0
+    move.l d0, a1
+    move.b (a1), d0           ; Command payload low d2
+
+    swap d2
+    move.l a0, d0
+    or.w d2, d0
+    move.l d0, a1
+    move.b (a1), d0           ; Command payload high d2
+
+    move.l a0, d0
+    or.w d3, d0
+    move.l d0, a1
+    move.b (a1), d0           ; Command payload low d3
+
+    swap d3
+    move.l a0, d0
+    or.w d3, d0
+    move.l d0, a1
+    move.b (a1), d0           ; Command payload high d3
+
+    ; SEND MEMORY BUFFER TO WRITE
+    lsr.w #1, d4              ; Copy two bytes each iteration
+    subq.w #1, d4             ; one less
+_write_to_sidecart_loop:
+    move.w (a4)+, d3
+    move.l a0, d0
+    or.w d3, d0
+    move.l d0, a1
+    move.b (a1), d0           ; Write the memory to the sidecart
+    dbf d4, _write_to_sidecart_loop
+
+    ; End of the command loop. Now we need to wait for the token
+    swap d2                   ; D2 is the only register that is not used as a scratch register
+_no_async_write_return:
+    rts                 ; if the code is SYNC, we will NOP this
+_end_async_write_code_in_stack:
+
+    move.l #$FFFFFFFF, d7
+_wait_sync_write_for_token_a_lot:
+    swap d7
+_wait_sync_write_for_token:
+    cmp.l random_token, d2                         ; Compare the random number with the token
+    beq.s _sync_write_token_found                  ; Token found, we can finish succesfully
+    dbf d7, _wait_sync_write_for_token
+    swap d7
+    dbf d7, _wait_sync_write_for_token_a_lot
+_sync_write_token_not_found:
+    moveq #-1, d0                     ; Timeout
+    rts
+_sync_write_token_found:
+    clr.w d0                            ; Clear the error code
+    rts
+    nop
+
+_end_sync_write_code_in_stack:
+
+    rts
+
+
+
 
 floppy_emulator_msg:
         dc.b	"SidecarT Floppy Emulator - "

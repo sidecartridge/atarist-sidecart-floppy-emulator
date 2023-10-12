@@ -199,7 +199,7 @@ load_image:
 ;  d0: logical sector number to start the transfer
 ;  d1: number of sectors to read/write
 ;  d2: sector size in bytes
-;  d3: rwflag for read/write
+;  d4: rwflag for read/write
 ;  a0: buffer address in the computer memory
 ; Output registers:
 ;  none
@@ -219,7 +219,7 @@ do_transfer_ramdisk:
     move.l d0, d7
     nf_stderr_lit read_buff_msg_logic_sector, 4
 
-    tst.w d3                    ; test rwflag
+    tst.w d4                    ; test rwflag
     bne.s write_buff            ; if not, write
 read_buff:
     exg a1,a0                   ; read, so swap source and destination
@@ -431,7 +431,7 @@ prg_memory_error_msg:
 
 
 image_file_name:
-            dc.b "GFA.st",0
+            dc.b "XENON2_3.st",0
 ;image_file:
 ;            even
 ;          	incbin images/XENON2.ST
