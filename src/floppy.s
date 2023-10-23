@@ -55,8 +55,7 @@
 ; CONSTANTS
 XBIOS_trap      equ $b8     ; TRAP #14 Handler (XBIOS)
 _bootdev        equ $446    ; This value represents the device from which the system was booted (0 = A:, 1 = B:, etc.)
-screenpt        equ $45E    ; If this value is non-zero then at the next vertical blank, 
-                            ; the value stored here will be loaded into the hardware register which points to the base of the physical screen
+
 hdv_bpb         equ $472    ; This vector is used when Getbpb() is called. A value of 0 indicates that no hard disk is attached.
 hdv_rw          equ $476    ; This vector is used when Rwabs() is called. A value of 0 here indicates that no hard disk is attached
 hdv_mediach     equ $47e    ; This vector is used when Mediach() is called. A value of 0 here indicates that no hard disk is attached.
@@ -199,10 +198,19 @@ setBPB:
 boot_disk:
     moveq   #1, d0
     clr.w _bootdev.w        ; Set emulated A as bootdevice
+    tst.w _nflops.w         ; Check if there are any floppies attached
+    beq.s _no_floppy_attached
+                            ; At least one floppy is attached
     move.w #2,_nflops.w     ; Simulate that floppy B is attached (it will be physical A)
-    clr.l screenpt.w        ; ??? OK! Profibuch error?
+    bra.s _start_boot
+
+_no_floppy_attached:
+                            ; If not, simulate only A attached
+    or.l #1,_drvbits.w      ; Create the drive A bit
+    move.w #1,_nflops.w     ; Simulate that floppy A is attached
 
     ; load bootsector and execute it if checksum is $1234
+_start_boot:
     move.w #1,-(sp)         ; sector 1
     clr.w -(sp)             ; side 0
     clr.w -(sp)             ; track 0
@@ -273,8 +281,8 @@ exe_emul_rw:
 exe_emul_rw_all:
     move.l 6(sp),a0             ; Buffer address
     move.l a0,d2
-    tst.l d2                    ; zbog blokade pri "open A if all via C"
-    beq no_buffer_error       ; just skip by error?
+    tst.l d2                    ; Check if buffer address is 0
+    beq no_buffer_error         ; just skip by error?
 
     moveq #0,d0
     move.l d0,d1
@@ -312,7 +320,7 @@ xbios_exit:
 ; New hdv_mediac routine
 new_hdv_mediac_routine:
     move.w 4(sp),d0             ; Read the drive doing the stuff
-    cmp.w disk_number,d0    ; Is this the disk_number we are emulating?
+    cmp.w disk_number,d0        ; Is this the disk_number we are emulating?
     beq.s media_changed         ; If is the disk we are emulating, go to media has changed
     cmp.b #1,d0                 ; Is it the Drive B?
     bne.s not_emul_media_change ; If not, jump to the old routine
@@ -326,7 +334,8 @@ media_changed:
     moveq #0,d0
     rts
 
-*New XBIOS map A calls to RAMdisk, B to physical A
+; New XBIOS map A calls to Sidecart,
+; B to physical A if it exists
 
 new_XBIOS_trap_routine:
     move.l sp,a0
