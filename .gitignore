@@ -56,3 +56,6 @@ build/
 dist/
 test/
 images/
+ataristdb/
+
+secrets.sh
