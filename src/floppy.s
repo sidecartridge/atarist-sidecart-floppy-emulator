@@ -471,14 +471,27 @@ read_sector_from_sidecart:
 
     move.l #image, a1
     lsr.w #2, d4
-    subq.w #1,d4                ; one less
-_copy_sector_byte:
+    subq.w #1,d4                        ; one less
+    move.l a0, d3
+    btst #0,d3                          ; If it's even, take the fast lane. If it's odd, take the slow lane
+    bne.s _copy_sector_byte_odd
+_copy_sector_byte_even:
     move.l (a1)+, (a0)+
-    dbf d4, _copy_sector_byte
+    dbf d4, _copy_sector_byte_even
     clr.w d0                    ; Clear the error code
 _error_reading_sector:
     movem.w (sp)+, d0-d3           ; Recover the number of sectors to read
     rts
+_copy_sector_byte_odd:
+    move.b (a1)+, (a0)+
+    move.b (a1)+, (a0)+
+    move.b (a1)+, (a0)+
+    move.b (a1)+, (a0)+
+    dbf d4, _copy_sector_byte_odd
+    clr.w d0                    ; Clear the error code
+    bra.s _error_reading_sector
+
+
 
 ; Write a sector to the sidecart
 ; Input registers:
@@ -767,16 +780,34 @@ _start_async_write_code_in_stack:
     move.b (a1), d0           ; Command payload high d3
 
     ; SEND MEMORY BUFFER TO WRITE
+ 
     lsr.w #1, d4              ; Copy two bytes each iteration
     subq.w #1, d4             ; one less
-_write_to_sidecart_loop:
-    move.w (a4)+, d3
+
+    ; Test if the address in A4 is even or odd
+    move.l a4, d0
+    btst #0, d0
+    beq.s _write_to_sidecart_even_loop
+_write_to_sidecart_odd_loop:
+    move.b  (a4)+, d3       ; Load the high byte
+    lsl.w   #8, d3          ; Shift it to the high part of the word
+    move.b  (a4)+, d3       ; Load the low byte
     move.l a0, d0
     or.w d3, d0
     move.l d0, a1
     move.b (a1), d0           ; Write the memory to the sidecart
-    dbf d4, _write_to_sidecart_loop
+    dbf d4, _write_to_sidecart_odd_loop
+    bra.s _write_to_sidecart_end_loop
 
+ _write_to_sidecart_even_loop:
+    move.w (a4)+, d3        ; Load the word
+    move.l a0, d0
+    or.w d3, d0
+    move.l d0, a1
+    move.b (a1), d0           ; Write the memory to the sidecart
+    dbf d4, _write_to_sidecart_even_loop
+
+_write_to_sidecart_end_loop:
     ; End of the command loop. Now we need to wait for the token
     swap d2                   ; D2 is the only register that is not used as a scratch register
 _no_async_write_return:
