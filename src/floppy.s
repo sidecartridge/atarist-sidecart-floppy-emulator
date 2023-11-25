@@ -37,7 +37,9 @@
         include inc/tos.s
         include inc/debug.s
     else
-        random_token:        equ $FA7000
+        ROM3_START_ADDR:     equ $FB0000 ; ROM3 start address
+        image:               equ (ROM3_START_ADDR + $1000) ; random_token + $1000 bytes
+        random_token:        equ ROM3_START_ADDR ; ROM3_START_ADDR + 0 bytes
         random_token_seed:   equ random_token + 4 ; random_token + 0 bytes
         BPB_data:            equ random_token_seed + 4 ; random_token + 4 bytes
         trackcnt:            equ BPB_data + 18 ; BPB_data + 18 bytes
@@ -49,7 +51,6 @@
         old_hdv_bpb:         equ old_XBIOS_trap + 4 ; old_XBIOS_trap + 4 bytes
         old_hdv_rw:          equ old_hdv_bpb + 4 ; old_hdv_bpb + 4 bytes
         old_hdv_mediach:     equ old_hdv_rw + 4 ; old_hdv_rw + 4 bytes
-        image:               equ $FA8000 ; 
     endif
 
 ; CONSTANTS
@@ -65,7 +66,6 @@ _drvbits        equ $4c2    ; Each of 32 bits in this longword represents a driv
 RANDOM_SEED     equ $1284FBCD ; Random seed for the random number generator. Should be provided by the pico in the future
 PING_WAIT_TIME  equ 8         ; Number of seconds (aprox) to wait for a ping response from the Sidecart. Power of 2 numbers. Max 127.
 
-ROM3_START_ADDR     equ $FB0000 ; ROM3 start address
 CMD_MAGIC_NUMBER    equ (ROM3_START_ADDR + $ABCD)   ; Magic number to identify a command
 APP_FLOPPYEMUL      equ $0200                       ; MSB is the app code. Floppy emulator is $02
 CMD_SAVE_VECTORS    equ ($0 + APP_FLOPPYEMUL)     ; Command code to save the old vectors
@@ -206,7 +206,7 @@ boot_disk:
 
 _no_floppy_attached:
                             ; If not, simulate only A attached
-    or.l #1,_drvbits.w      ; Create the drive A bit
+    move.l #1,_drvbits.w    ; Create the drive A bit
     move.w #1,_nflops.w     ; Simulate that floppy A is attached
 
     ; load bootsector and execute it if checksum is $1234
@@ -355,8 +355,8 @@ _floppy_read:
     bne.s _floppy_read_emulated_a   ; if is not B then is A
     clr.w 16(a0)                    ; Map B drive to physical A  
 _continue_xbios:
-    move.l old_XBIOS_trap,a0        ; get old XBIOS vector
-    jmp (a0)
+    move.l old_XBIOS_trap, -(sp)
+    rts
 
 _floppy_read_emulated_a:   
     movem.l a1/d1-d7,-(sp)
