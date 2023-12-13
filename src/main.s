@@ -23,7 +23,10 @@
 ; bit 30: TOS application .
 ; bit 31: TTP
 
-;Rom cartridge
+; Rom cartridge
+; Force pc relative mode
+
+	opt	a+
 
 	org $FA0000
 
