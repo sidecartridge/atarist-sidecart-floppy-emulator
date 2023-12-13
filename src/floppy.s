@@ -85,12 +85,17 @@ CMD_PING            equ ($4 + APP_FLOPPYEMUL)     ; Command code to ping to the 
     endif
 rom_function:
     print floppy_emulator_msg
-    print loading_image_msg
 
     ifeq _DEBUG
+    move.w #3, d7           ; retries of the ping command
+_ping_retry:
+    move.w d7, -(sp)
+    print loading_image_msg
     bsr ping
+    move.w (sp)+, d7
     tst.w d0
     beq.s _ping_ok
+    dbf d7, _ping_retry
 
     asksil error_sidecart_comm_msg
     endif
@@ -206,7 +211,7 @@ boot_disk:
 
 _no_floppy_attached:
                             ; If not, simulate only A attached
-    move.l #1,_drvbits.w    ; Create the drive A bit
+    or.l #1,_drvbits.w      ; Create the drive A bit
     move.w #1,_nflops.w     ; Simulate that floppy A is attached
 
     ; load bootsector and execute it if checksum is $1234
