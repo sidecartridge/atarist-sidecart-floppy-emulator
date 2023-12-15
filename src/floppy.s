@@ -115,14 +115,54 @@ _init_BPB:
 
     bsr setBPB
     tst.w d0
-    beq.s _init_vectors
+    beq.s _disable_xbios_trap_countdown
 
     asksil error_setup_BPB_msg
     rts
 
-_init_vectors:
+_disable_xbios_trap_countdown:
+    print show_disable_xbios_instructions_msg
+    lea countdown(pc),a6
+; Add a slight delay before reading the keyboard
+	move.w #5,d6
 
+.print_loop:
+	move.l a6, -(sp)
+	addq.l #3,a6
+
+	move.w #9,-(sp)
+	trap #1
+	addq.l #6,sp
+
+	move.w #50,d7
+.ddell:
+    move.w #37,-(sp)			; XBIOS Vsync wait
+    trap #14
+    addq.l #2,sp
+
+; Now check the left shift key. If pressed, exit.
+	move.w #-1, -(sp)			; Read all key status
+    move.w #$b, -(sp)			; XBIOS Get shift key status
+    trap #13
+    addq.l #4,sp
+
+    dbf d7,.ddell
+
+    btst #1,d0
+    bne.s _disable_xbios_trap
+
+	dbf d6, .print_loop
+
+	; If we are here, don't disable the XBIOS trap
     print init_vectors_msg
+    moveq #0, d7
+    bra.s _init_vectors
+
+_disable_xbios_trap:
+    print not_intercepting_vectors_msg
+    moveq #1, d7
+
+_init_vectors:
 
     bsr set_new_vectors
 
@@ -188,7 +228,10 @@ set_new_vectors:
     move.l  #new_hdv_bpb_routine,hdv_bpb.w
     move.l  #new_hdv_rw_routine,hdv_rw.w
     move.l  #new_hdv_mediac_routine,hdv_mediach.w
+    tst.w   d7
+    bne.s  _dont_set_xbios_trap
     move.l  #new_XBIOS_trap_routine,XBIOS_trap.w
+_dont_set_xbios_trap:
     rts
 
 ; Call to the Sidecart RP2040 to calculate the BPB of the emulated disk
@@ -201,7 +244,6 @@ setBPB:
     endif
 
 boot_disk:
-    moveq   #1, d0
     clr.w _bootdev.w        ; Set emulated A as bootdevice
     tst.w _nflops.w         ; Check if there are any floppies attached
     beq.s _no_floppy_attached
@@ -211,25 +253,22 @@ boot_disk:
 
 _no_floppy_attached:
                             ; If not, simulate only A attached
-    or.l #1,_drvbits.w      ; Create the drive A bit
+    move.l #1,_drvbits.w    ; Create the drive A bit
     move.w #1,_nflops.w     ; Simulate that floppy A is attached
 
     ; load bootsector and execute it if checksum is $1234
 _start_boot:
-    move.w #1,-(sp)         ; sector 1
-    clr.w -(sp)             ; side 0
-    clr.w -(sp)             ; track 0
-    move.w #1,-(sp)         ; sector 1 (boot)
-    clr.w -(sp)             ; Drive A
-    clr.l -(sp)             ; dummy
-    pea $2000               ; Star reading at $2000
-    move.w #8,-(sp)         ; floppy read
-    trap #14                ; XBIOS
-    lea $14(sp),sp          ; Restore stack
+; Read sectors from the sidecart. Don't use XBIOS call
+    moveq #0, d0
+    moveq #1, d1
+    move.w BPB_data, d2
+    lea $2000,a0            ; Start reading at $2000
+    move.l a0, -(sp)
+    bsr read_sectors_from_sidecart
 
     ; Test checksum
 
-    lea $2000,a1            ; Start reading at $2000
+    move.l (sp)+, a1        ; Start reading at $2000
     move.l a1,a0
     move.w #255,d1          ; Read 512 bytes
     clr.l d2
@@ -257,8 +296,8 @@ new_hdv_bpb_routine:
     bne.s not_emul_bpp          ; If not, jump to the old routine
     clr.w 4(sp)                 ; Map B as A
 not_emul_bpp:
-    move.l old_hdv_bpb,a0
-    jmp (a0)
+    move.l old_hdv_bpb,-(sp)
+    rts
 
 load_emul_bpp:
     move.l #BPB_data,d0         ; Load the emulated BPP
@@ -270,23 +309,21 @@ load_emul_bpp:
 ; But the final implementation should read from the RP2040 side thanks to the 
 ; commands sent from the ATARI ST side
 new_hdv_rw_routine:
-    move.w 14(sp),d0            ; Read the drive doing the stuff
-    cmp.w disk_number,d0        ; Is this the disk_number we are emulating?
+    move.w 14(sp),d7            ; Read the drive doing the stuff
+    cmp.w disk_number,d7        ; Is this the disk_number we are emulating?
     beq.s exe_emul_rw           ; If is the disk to emulate, read/write the emulated disk
-    cmp.b #1,d0                 ; Is it the Drive B?
+    cmp.b #1,d7                 ; Is it the Drive B?
     bne.s not_exe_emul_rw       ; If not, jump to the old routine
     clr.w 14(sp)                ; Map B as A
 
 not_exe_emul_rw:
-    move.l old_hdv_rw,a0
-    jmp (a0)
+    move.l old_hdv_rw,-(sp)
+    rts
 
 exe_emul_rw:
-    sf d3                       ; flag for RWABS call
+    sf d3                       ; Set FALSE flag for RWABS call
 exe_emul_rw_all:
-    move.l 6(sp),a0             ; Buffer address
-    move.l a0,d2
-    tst.l d2                    ; Check if buffer address is 0
+    tst.l 6(sp)                 ; Check if buffer address is 0
     beq no_buffer_error         ; just skip by error?
 
     moveq #0,d0
@@ -297,6 +334,7 @@ exe_emul_rw_all:
     move.w 10(sp),d1            ; Number of sectors to read/write
     move.w BPB_data, d2         ; Sector size
     move.w 4(sp), d4            ; rwflag
+    move.l 6(sp), a0            ; Buffer address
 
     ifne _DEBUG
         bsr do_transfer_ramdisk     ; Do the transfer ramdisk
@@ -319,7 +357,7 @@ xbios_exit:
         nf_crlf
     endif
     lea 20(sp),sp
-    movem.l (sp)+,d1-d7/a1 
+    movem.l (sp)+,d3-d7 
     rte
 
 ; New hdv_mediac routine
@@ -332,8 +370,8 @@ new_hdv_mediac_routine:
     clr.w 4(sp)                 ; Map B as A
 
 not_emul_media_change:
-    move.l old_hdv_mediach,a0
-    jmp (a0)
+    move.l old_hdv_mediach,-(sp)
+    rts
 
 media_changed:
     moveq #0,d0
@@ -341,32 +379,81 @@ media_changed:
 
 ; New XBIOS map A calls to Sidecart,
 ; B to physical A if it exists
-
+; The XBIOS, like the BIOS may utilize registers D0-D2 and A0-A2 as scratch registers and their
+; contents should not be depended upon at the completion of a call. In addition, the function
+; opcode placed on the stack will be modified.
 new_XBIOS_trap_routine:
     move.l sp,a0
-    btst #5,(sp)                    ; check if called from user mode
+    ;
+    ; Check if the trap was called from user mode or supervisor mode. And correct the stack pointer if needed.
+    ;
+    btst #5,(a0)                    ; check if called from user mode
     bne.s _not_user                 ; if not, do not correct stack pointer
     move.l usp,a0                   ; if yes, correct stack pointer
     subq.l #6,a0                    ; correct stack pointer
 _not_user:
-    move.w 6(a0),d0                 ; get XBIOS call number
-    cmp.w #8,d0                     ; is it XBIOS call 8?
-    beq.s _floppy_read              ; if yes, go to flopppy read
-    cmp.w #9,d0                     ; is it XBIOS call 9?
-    bne.s _continue_xbios           ; if not, continue with XBIOS call
- 
-_floppy_read:
+    ;
+    ; This code checks if the CPU is a 68000 or not
+    ;
+    tst.w $59e
+    beq.s _68000
+    addq.w #2, a0
+_68000:
+                                    ; get XBIOS call number
+    cmp.w #8,6(a0)                  ; is it XBIOS call Flopwr?
+    beq.s _floppy_rw                ; if yes, go to flopppy read
+    cmp.w #9,6(a0)                  ; is it XBIOS call Floprd?
+    beq.s _floppy_rw                ; if yes, go to flopppy read
+    cmp.w #13,6(a0)                 ; is it XBIOS call Flopver?
+    beq.s _floppy_verify            ; if yes, go to flopppy verify
+    cmp.w #10,6(a0)                 ; is it XBIOS call Flopfmt?
+    beq.s _floppy_format            ; if yes, go to flopppy format
+    move.l old_XBIOS_trap, -(sp)    ; if not, continue with XBIOS call
+    rts 
+
+    ;
+    ; Trapped XBIOS call 13 with the floppy disk drive verify function
+    ; Return always verified successfully
+    ;
+_floppy_verify:
+    cmp.w #1,16(a0)
+    bne.s _floppy_verify_emulated_a   ; if is not B then is A
+    clr.w 16(a0)                      ; Map B drive to physical A
+    move.l old_XBIOS_trap, -(sp)      ; continue with XBIOS call
+    rts 
+
+_floppy_verify_emulated_a:
+    clr.l d0                           ; If SidecarT, always verified successfully
+    move.l  d0, 8(a0)                  ; Set the error code to 0 in buff
+    rte
+
+    ;
+    ; Trapped XBIOS call 10 with the floppy disk drive format function
+    ; Return always formatted with errors
+_floppy_format:
+    cmp.w #1,16(a0)
+    bne.s _floppy_format_emulated_a   ; if is not B then is A
+    clr.w 16(a0)                      ; Map B drive to physical A
+    move.l old_XBIOS_trap, -(sp)      ; continue with XBIOS call
+    rts
+_floppy_format_emulated_a:
+    moveq #-1, d0                     ; If SidecarT, always formatted with errors
+    clr.l 8(a0)                       ; Set the error code to 0 in the buff
+    rte
+
+    ;
+    ; Trapped XBIOS calls 8 and 9 with the floppy disk drive read and write functions
+    ;
+_floppy_rw:
     cmp.w #1,16(a0)
     bne.s _floppy_read_emulated_a   ; if is not B then is A
-    clr.w 16(a0)                    ; Map B drive to physical A  
-_continue_xbios:
-    move.l old_XBIOS_trap, -(sp)
-    rts
+    clr.w 16(a0)                    ; Map B drive to physical A
+    move.l old_XBIOS_trap, -(sp)      ; continue with XBIOS call
+    rts 
 
 _floppy_read_emulated_a:   
-    movem.l a1/d1-d7,-(sp)
-    lea -20(sp),sp                  ; If called from super mode
-    st d3                           ; flag for XBIOS call
+    movem.l d3-d7,-(sp)
+    lea -20(sp),sp                  ; Rewind to the beginning of the stack parameters of the call
     addq.l #6,a0
     move.l  2(a0),6(sp)             ; buffer -OK
     move.w 18(a0),10(sp)            ; sector count - OK
@@ -380,22 +467,18 @@ _floppy_read_emulated_a:
     clr.l d2
     move.w 16(a0),d2                ; side no
     clr.l d4
-    move.w secpcyl,d4               ; sec/track
-    mulu d4,d1
+    mulu secpcyl,d1                 ; sec/track
     add.w d1,d0                     ; track no * sec/track + start sect no
 
-    move.w secptrack,d4             ; sec/cyl
-    mulu d4,d2
+    mulu secptrack,d2               ; sec/cyl
     add.w d2,d0                     ; side no * sec/cyl + track no * sec/track + start sect no
-    move.w d0,12(sp)                ; logical start sector for RAMdisk
+    move.w d0,12(sp)                ; logical start sector for read from emulated disk
+    move.w #-1, 4(sp)               ; flag for read
+    st d3                           ; Set TRUE flag for XBIOS call
     cmp.w #9,(a0)                   ; is write?
-    beq.s _do_emulated_write
-    clr.w 4(sp)                     ; flag for read
+    beq exe_emul_rw_all
+    clr.w 4(sp)                     ; No, is read
     bra exe_emul_rw_all 
-_do_emulated_write:
-    move.w #1,4(sp)
-    bra exe_emul_rw_all   
-
 
 ; Perform the transference of the data from/to the emulated disk in RP2040 
 ; to the computer
@@ -524,34 +607,6 @@ write_sector_to_sidecart:
     clr.w d0                       ; Clear the error code
 _error_writing_sector:
     movem.w (sp)+, d0-d3           ; Recover the number of sectors to read
-    rts
-
-
-
-
-; Send an async command to the Sidecart
-; Fire and forget style
-; Input registers:
-; d0.w: command code
-; d1.w: payload size
-; From d2 to d7 the payload based on the size of the payload field d1.w
-; The order is: d2.l d2.h d3.l d3.h d4.l d4.h d5.l d5.h d6.l d6.h d7.l d7.h
-; the limit is not 12 words, but since this code is going to be executed in the
-; Atari ST ROM, its difficult to not use a buffer in RAM
-; Output registers:
-; d1-d7 are modified. a0-a3 modified.
-send_async_command_to_sidecart:
-    move.l #_end_async_code_in_stack - _start_async_code_in_stack, d7
-    lea -(_end_async_code_in_stack - _start_async_code_in_stack)(sp), sp
-    move.l sp, a2
-    lea _start_async_code_in_stack, a1    ; a1 points to the start of the code in ROM
-    lsr.w #2, d7
-    subq #1, d7
-_copy_async_code:
-    move.l (a1)+, (a2)+
-    dbf d7, _copy_async_code
-    jsr (a3)                                                            ; Jump to the code in the stack
-    lea (_end_async_code_in_stack - _start_async_code_in_stack)(sp), sp
     rts
 
 ; Send an sync command to the Sidecart
@@ -870,17 +925,38 @@ save_vectors_msg:
 error_save_vectors_msg:
         dc.b	"Error saving the old vectors",$d,$a,0
 
-init_vectors_msg:
-        dc.b	"+- Initializing new vectors",$d,$a,0
-
 setup_BPB_msg:
         dc.b	"+- Setting BPB of the emulated disk",$d,$a,0
 
 error_setup_BPB_msg:
         dc.b	"Error setting BPB of the emulated disk",$d,$a,0
 
+show_disable_xbios_instructions_msg:
+    dc.b    "+- Disable XBIOS trap:",$d,$a
+    dc.b    "   Some programs may not work if",$d,$a
+    dc.b    "   the XBIOS vector is intercepted",$d,$a
+    dc.b    "   to a routine that is not the",$d,$a
+    dc.b    "   original, especially TOS 1.00",$d,$a
+    dc.b    "   and 1.02.",$d,$a,$d,$a
+    dc.b    "   Press LEFT SHIFT to disable...",0
+
+countdown:
+	dc.b "5",8,0
+	dc.b "4",8,0
+	dc.b "3",8,0
+	dc.b "2",8,0
+	dc.b "1",8,0
+	dc.b "0",8,0
+
+init_vectors_msg:
+        dc.b	$d,$a,"+- Intercepting XBIOS trap",$d,$a,0
+
+not_intercepting_vectors_msg:
+        dc.b	$d,$a,"+- Bypassing XBIOS trap",$d,$a,0
+
 boot_disk_msg:
-        dc.b	"+- Booting emulated disk",$d,$a,0
+        dc.b	"+- Booting emulated disk...",0
+
 
         even
 rom_function_end:
