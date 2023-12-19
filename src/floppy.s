@@ -51,6 +51,7 @@
         old_hdv_bpb:         equ old_XBIOS_trap + 4 ; old_XBIOS_trap + 4 bytes
         old_hdv_rw:          equ old_hdv_bpb + 4 ; old_hdv_bpb + 4 bytes
         old_hdv_mediach:     equ old_hdv_rw + 4 ; old_hdv_rw + 4 bytes
+        hardware_type:       equ old_hdv_mediach + 4 ; old_hdv_mediach + 4 bytes
     endif
 
 ; CONSTANTS
@@ -73,6 +74,7 @@ CMD_SET_BPB         equ ($1 + APP_FLOPPYEMUL)     ; Command code to set the BPB 
 CMD_READ_SECTOR     equ ($2 + APP_FLOPPYEMUL)     ; Command code to read a sector from the emulated disk
 CMD_WRITE_SECTOR    equ ($3 + APP_FLOPPYEMUL)     ; Command code to write a sector to the emulated disk
 CMD_PING            equ ($4 + APP_FLOPPYEMUL)     ; Command code to ping to the Sidecart
+CMD_SAVE_HARDWARE   equ ($5 + APP_FLOPPYEMUL)     ; Command code to save the hardware type of the ATARI computer
 
     ifne _RELEASE
         include inc/tos.s
@@ -115,9 +117,19 @@ _init_BPB:
 
     bsr setBPB
     tst.w d0
-    beq.s _disable_xbios_trap_countdown
+    beq.s _detect_hw_type
 
     asksil error_setup_BPB_msg
+    rts
+
+_detect_hw_type:
+    print detect_hardware_msg
+
+    bsr _detect_hw
+    tst.w d0
+    beq.s _disable_xbios_trap_countdown
+
+    asksil error_detect_hardware_msg
     rts
 
 _disable_xbios_trap_countdown:
@@ -283,6 +295,29 @@ _checksum_loop:             ; Calculate checksum
 _dont_boot:
     rts
 
+_detect_hw:
+	move.l $5a0.w,d0            ; Check the cookie-jar to know what type of machine we are running on
+	beq _old_hardware           ; No cookie-jar, so it's a TOS <= 1.04
+	movea.l d0,a0               ; Get the address of the cookie-jar
+_loop_cookie:
+	move.l (a0)+,d0             ; The cookie jar value is zero, so old hardware again
+	beq _old_hardware
+	cmp.l #'_MCH',d0            ; Is it the _MCH cookie?
+	beq.s _found_cookie         ; Yes, so we found the machine type
+	addq.w #4,a0                ; No, so skip the cookie name
+	bra.s _loop_cookie                 ; And try the next cookie
+_found_cookie:
+	move.l	(a0)+,d3            ; Get the cookie value
+	bra.s	_save_hw
+_old_hardware:
+    clr.l d3                    ; 0x0000	0x0000	Atari ST (260 ST,520 ST,1040 ST,Mega ST,...)
+_save_hw:
+    move.w #CMD_SAVE_HARDWARE,d0        ; Command code SAVE_HARDWARE
+    move.w #12,d1                        ; Payload size is 4 bytes. Payload in d3.l, d4.l and d5.l
+    move.l #do_transfer_sidecart, d4    ; Address of the start function to overwrite the speed change
+    move.l #exit_transfer_sidecart, d5  ; Address of the end function to overwrite the speed change
+    bsr send_sync_command_to_sidecart
+    rts
 
 ; New hdv_bpb routine
 ; Load the BPB of the emulated disk if it's drive A or B
@@ -491,14 +526,26 @@ _floppy_read_emulated_a:
 ; Output registers:
 ;  none
 do_transfer_sidecart:
+    ; START: WE MUST 'NOP' 16 BYTES HERE
+    move.b $ffff8e21.w, -(sp)        ; Save the old value of cpu speed. 4 BYTES
+	and.b #%00000001,$ffff8e21.w     ; disable MSTe cache. 6 BYTES
+	bclr.b #0,$ffff8e21.w            ; set CPU speed at 8mhz. 6 BYTES
+    ; END: WE MUST 'NOP' 16 BYTES HERE
     tst.w d4                    ; test rwflag
     bne write_sidecart          ; if not, write
 read_sidecart:
     move.l a0, a1
-    bra read_sectors_from_sidecart
+    bsr read_sectors_from_sidecart
+    bra.s exit_transfer_sidecart
 write_sidecart:
     move.l a0, a4
-    bra write_sectors_from_sidecart  
+    bsr write_sectors_from_sidecart
+
+exit_transfer_sidecart:
+    ; START: WE MUST 'NOP' 4 BYTES HERE
+    move.b (sp)+, $ffff8e21.w   ; Restore the old value of cpu speed. 4 BYTES
+    ; END: WE MUST 'NOP' 4 BYTES HERE
+    rts
 
 ; Read sectors from the sidecart
 ; Input registers:
@@ -629,7 +676,6 @@ send_sync_command_to_sidecart:
 _copy_sync_code:
     move.l (a1)+, (a2)+
     dbf d7, _copy_sync_code
-    move.w #$4e71, (_no_async_return - _start_sync_code_in_stack)(a3)   ; Put a NOP when sync
     jsr (a3)                                                            ; Jump to the code in the stack
     lea (_end_sync_code_in_stack - _start_sync_code_in_stack)(sp), sp
     rts
@@ -637,8 +683,6 @@ _copy_sync_code:
 _start_sync_code_in_stack:
     ; The sync command synchronize with a random token
     move.l random_token_seed,d2
-    mulu  #221,d2
-    add.b #53, d2                       ; Save the random number in d2
     addq.w #4, d1                       ; Add 4 bytes to the payload size to include the token
 
 _start_async_code_in_stack:
@@ -676,14 +720,14 @@ _start_async_code_in_stack:
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d2
     cmp.w #4, d1
-    beq _no_more_payload_stack
+    beq.s _no_more_payload_stack
 
     move.l a0, d0
     or.w d3, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d3
     cmp.w #6, d1
-    beq _no_more_payload_stack
+    beq.s _no_more_payload_stack
 
     swap d3
     move.l a0, d0
@@ -691,14 +735,14 @@ _start_async_code_in_stack:
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d3
     cmp.w #8, d1
-    beq _no_more_payload_stack
+    beq.s _no_more_payload_stack
 
     move.l a0, d0
     or.w d4, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d4
     cmp.w #10, d1
-    beq _no_more_payload_stack
+    beq.s _no_more_payload_stack
 
     swap d4
     move.l a0, d0
@@ -738,19 +782,13 @@ _start_async_code_in_stack:
 
 _no_more_payload_stack:
     swap d2                   ; D2 is the only register that is not used as a scratch register
-_no_async_return:
-    rts                 ; if the code is SYNC, we will NOP this
-_end_async_code_in_stack:
+    move.l #$000FFFFF, d7
 
-    move.l #$FFFFFFFF, d7
-_wait_sync_for_token_a_lot:
-    swap d7
 _wait_sync_for_token:
     cmp.l random_token, d2              ; Compare the random number with the token
-    beq.s _sync_token_found                  ; Token found, we can finish succesfully
-    dbf d7, _wait_sync_for_token
-    swap d7
-    dbf d7, _wait_sync_for_token_a_lot
+    beq.s _sync_token_found             ; Token found, we can finish succesfully
+    subq.l #1, d7                       ; Decrement the inner loop
+    bne.s _wait_sync_for_token          ; If the inner loop is not finished, continue
 _sync_token_not_found:
     moveq #-1, d0                     ; Timeout
     rts
@@ -760,7 +798,6 @@ _sync_token_found:
     nop
 
 _end_sync_code_in_stack:
-
     rts
 
 ; Send an sync write command to the Sidecart
@@ -919,6 +956,12 @@ loading_image_msg:
 error_sidecart_comm_msg:
         dc.b	"Sidecart error communication. Reset!",$d,$a,0
 
+detect_hardware_msg:
+        dc.b	"+- Detecting hardware...",$d,$a,0
+
+error_detect_hardware_msg:
+        dc.b	"Error detecting hardware",$d,$a,0
+ 
 save_vectors_msg:
         dc.b	"+- Saving the old vectors",$d,$a,0
 
