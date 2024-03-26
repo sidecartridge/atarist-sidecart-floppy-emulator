@@ -24,7 +24,7 @@
         XREF    setBPB
         XREF    random_token
         XREF    random_token_seed
-        XREF    image
+        XREF    sidecart_read_buf
         XREF    BPB_data
         XREF    old_XBIOS_trap
         XREF    old_hdv_bpb
@@ -38,10 +38,14 @@
         include inc/debug.s
     else
         ROM3_START_ADDR:     equ $FB0000 ; ROM3 start address
-        image:               equ (ROM3_START_ADDR + $1000) ; random_token + $1000 bytes
+        sidecart_read_buf:   equ (ROM3_START_ADDR + $1000) ; random_token + $1000 bytes
         random_token:        equ ROM3_START_ADDR ; ROM3_START_ADDR + 0 bytes
-        random_token_seed:   equ random_token + 4 ; random_token + 0 bytes
-        BPB_data:            equ random_token_seed + 4 ; random_token + 4 bytes
+        random_token_seed:   equ (random_token + 4) ; random_token + 0 bytes
+        BOOT_SECTOR_ENABLED: equ (random_token_seed + 4) ; random_token + 4 bytes
+        BUFFER_TYPE:         equ (BOOT_SECTOR_ENABLED + 4)       ; boot_sector_enabled + 4 byte
+        XBIOS_ENABLED:       equ (BUFFER_TYPE + 4)             ; buffer_type + 4 bytes
+
+        BPB_data:            equ (XBIOS_ENABLED + 4) ; XBIOS enabled + 4 bytes
         trackcnt:            equ BPB_data + 18 ; BPB_data + 18 bytes
         sidecnt:             equ trackcnt + 2 ; trackcnt + 2 bytes
         secpcyl:             equ sidecnt + 2 ; sidecnt + 2 bytes
@@ -63,9 +67,16 @@ hdv_rw          equ $476    ; This vector is used when Rwabs() is called. A valu
 hdv_mediach     equ $47e    ; This vector is used when Mediach() is called. A value of 0 here indicates that no hard disk is attached.
 _nflops         equ $4a6    ; This value indicates the number of floppy drives currently connected to the system
 _drvbits        equ $4c2    ; Each of 32 bits in this longword represents a drive connected to the system. Bit #0 is A, Bit #1 is B and so on.
+_dskbufp        equ $4c6    ; Address of the disk buffer pointer    
+
 
 RANDOM_SEED     equ $1284FBCD ; Random seed for the random number generator. Should be provided by the pico in the future
 PING_WAIT_TIME  equ 8         ; Number of seconds (aprox) to wait for a ping response from the Sidecart. Power of 2 numbers. Max 127.
+
+ROM_EXCHG_BUFFER_ADDR equ (ROM3_START_ADDR)               ; ROM3 buffer address
+RANDOM_TOKEN_ADDR:        equ (ROM_EXCHG_BUFFER_ADDR)
+RANDOM_TOKEN_SEED_ADDR:   equ (RANDOM_TOKEN_ADDR + 4) ; RANDOM_TOKEN_ADDR + 0 bytes
+RANDOM_TOKEN_POST_WAIT:   equ $64        ; Wait this cycles after the random number generator is ready
 
 CMD_MAGIC_NUMBER    equ (ROM3_START_ADDR + $ABCD)   ; Magic number to identify a command
 APP_FLOPPYEMUL      equ $0200                       ; MSB is the app code. Floppy emulator is $02
@@ -103,6 +114,7 @@ _ping_retry:
     endif
 
 _ping_ok:
+    print ok_msg
     print save_vectors_msg
 
     bsr save_vectors
@@ -113,6 +125,7 @@ _ping_ok:
     rts
 
 _init_BPB:
+    print ok_msg
     print setup_BPB_msg
 
     bsr setBPB
@@ -123,59 +136,45 @@ _init_BPB:
     rts
 
 _detect_hw_type:
+    print ok_msg
     print detect_hardware_msg
 
     bsr _detect_hw
     tst.w d0
-    beq.s _disable_xbios_trap_countdown
+    beq.s _display_buffer_type
 
     asksil error_detect_hardware_msg
     rts
 
+_display_buffer_type:
+    print ok_msg
+    tst.l BUFFER_TYPE
+    beq.s _display_diskbuf_buffer_type
+    print stack_buffer_msg
+    bra.s _display_boot_enabled
+_display_diskbuf_buffer_type:
+    print dskbuf_buffer_msg
+
+_display_boot_enabled:
+    print ok_msg
+    tst.l BOOT_SECTOR_ENABLED
+    beq.s _display_boot_disabled
+    print boot_sector_enabled_msg
+    bra.s _disable_xbios_trap_countdown
+_display_boot_disabled:
+    print boot_sector_disabled_msg
+
 _disable_xbios_trap_countdown:
-    print show_disable_xbios_instructions_msg
-    lea countdown(pc),a6
-; Add a slight delay before reading the keyboard
-	move.w #5,d6
-
-.print_loop:
-	move.l a6, -(sp)
-	addq.l #3,a6
-
-	move.w #9,-(sp)
-	trap #1
-	addq.l #6,sp
-
-	move.w #50,d7
-.ddell:
-    move.w #37,-(sp)			; XBIOS Vsync wait
-    trap #14
-    addq.l #2,sp
-
-; Now check the left shift key. If pressed, exit.
-	move.w #-1, -(sp)			; Read all key status
-    move.w #$b, -(sp)			; XBIOS Get shift key status
-    trap #13
-    addq.l #4,sp
-
-    dbf d7,.ddell
-
-    btst #1,d0
-    bne.s _disable_xbios_trap
-
-	dbf d6, .print_loop
-
-	; If we are here, don't disable the XBIOS trap
+    tst.l XBIOS_ENABLED
+    beq.s _disable_xbios_trap
     print init_vectors_msg
     moveq #0, d7
     bra.s _init_vectors
-
 _disable_xbios_trap:
     print not_intercepting_vectors_msg
     moveq #1, d7
-
 _init_vectors:
-
+    print ok_msg
     bsr set_new_vectors
 
     print boot_disk_msg
@@ -288,6 +287,11 @@ _checksum_loop:             ; Calculate checksum
     add.w (a1)+,d2  
     dbf d1,_checksum_loop
 
+    tst.l BOOT_SECTOR_ENABLED
+    bne.s .boot_sector_enabled
+    rts
+
+.boot_sector_enabled:
     cmp.w #$1234,d2         ; Compare to the magic numnber
     bne.s _dont_boot        ; If equal, boot at $2000
     jmp (a0)                
@@ -305,7 +309,7 @@ _loop_cookie:
 	cmp.l #'_MCH',d0            ; Is it the _MCH cookie?
 	beq.s _found_cookie         ; Yes, so we found the machine type
 	addq.w #4,a0                ; No, so skip the cookie name
-	bra.s _loop_cookie                 ; And try the next cookie
+	bra.s _loop_cookie          ; And try the next cookie
 _found_cookie:
 	move.l	(a0)+,d3            ; Get the cookie value
 	bra.s	_save_hw
@@ -604,7 +608,7 @@ read_sector_from_sidecart:
     tst.w d0
     bne.s _error_reading_sector
 
-    move.l #image, a1
+    move.l #sidecart_read_buf, a1
     lsr.w #2, d4
     subq.w #1,d4                        ; one less
     move.l a0, d3
@@ -666,23 +670,28 @@ _error_writing_sector:
 ; d0: error code, 0 if no error
 ; d1-d7 are modified. a0-a3 modified.
 send_sync_command_to_sidecart:
+    move.l (sp)+, a0                 ; Return address
     move.l #_end_sync_code_in_stack - _start_sync_code_in_stack, d7
+    tst.l BUFFER_TYPE
+    bne.s .send_sync_command_to_sidecart_use_stack_buffer
+    move.l _dskbufp, a2                ; Address of the buffer to send the command
+    bra.s .send_sync_command_to_sidecart_continue
+.send_sync_command_to_sidecart_use_stack_buffer:
     lea -(_end_sync_code_in_stack - _start_sync_code_in_stack)(sp), sp
     move.l sp, a2
-    move.l sp, a3
+.send_sync_command_to_sidecart_continue:
+    move.l a2, a3
     lea _start_sync_code_in_stack, a1    ; a1 points to the start of the code in ROM
     lsr.w #2, d7
     subq #1, d7
 _copy_sync_code:
     move.l (a1)+, (a2)+
     dbf d7, _copy_sync_code
-    jsr (a3)                                                            ; Jump to the code in the stack
-    lea (_end_sync_code_in_stack - _start_sync_code_in_stack)(sp), sp
-    rts
 
-_start_sync_code_in_stack:
+    move.l a0, a2                       ; Return address to a2    ; The sync command synchronize with a random token
+
     ; The sync command synchronize with a random token
-    move.l random_token_seed,d2
+    move.l RANDOM_TOKEN_SEED_ADDR,d2
     addq.w #4, d1                       ; Add 4 bytes to the payload size to include the token
 
 _start_async_code_in_stack:
@@ -690,7 +699,7 @@ _start_async_code_in_stack:
 
     ; SEND HEADER WITH MAGIC NUMBER
     swap d0                     ; Save the command code in the high word of d0         
-    move.b CMD_MAGIC_NUMBER, d0; Command header. d0 is a scratch register
+    move.b CMD_MAGIC_NUMBER, d0 ; Command header. d0 is a scratch register
 
     ; SEND COMMAND CODE
     swap d0                     ; Recover the command code
@@ -720,14 +729,14 @@ _start_async_code_in_stack:
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d2
     cmp.w #4, d1
-    beq.s _no_more_payload_stack
+    beq _no_more_payload_stack
 
     move.l a0, d0
     or.w d3, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d3
     cmp.w #6, d1
-    beq.s _no_more_payload_stack
+    beq _no_more_payload_stack
 
     swap d3
     move.l a0, d0
@@ -735,14 +744,14 @@ _start_async_code_in_stack:
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d3
     cmp.w #8, d1
-    beq.s _no_more_payload_stack
+    beq _no_more_payload_stack
 
     move.l a0, d0
     or.w d4, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d4
     cmp.w #10, d1
-    beq.s _no_more_payload_stack
+    beq _no_more_payload_stack
 
     swap d4
     move.l a0, d0
@@ -782,23 +791,35 @@ _start_async_code_in_stack:
 
 _no_more_payload_stack:
     swap d2                   ; D2 is the only register that is not used as a scratch register
-    move.l #$000FFFFF, d7
+    move.l #$000FFFFF, d7     ; Most significant word is the inner loop, least significant word is the outer loop
+    moveq #0, d0              ; Timeout
+    jmp (a3)                  ; Jump to the code in the stack
+; This is the code that cannot run in ROM while waiting for the command to complete
+_start_sync_code_in_stack:
+    cmp.l RANDOM_TOKEN_ADDR, d2              ; Compare the random number with the token
+    beq.s _sync_token_found                  ; Token found, we can finish succesfully
+    subq.l #1, d7                            ; Decrement the inner loop
+    bne.s _start_sync_code_in_stack          ; If the inner loop is not finished, continue
 
-_wait_sync_for_token:
-    cmp.l random_token, d2              ; Compare the random number with the token
-    beq.s _sync_token_found             ; Token found, we can finish succesfully
-    subq.l #1, d7                       ; Decrement the inner loop
-    bne.s _wait_sync_for_token          ; If the inner loop is not finished, continue
-_sync_token_not_found:
-    moveq #-1, d0                     ; Timeout
-    rts
+
+    ; Sync token not found, timeout
+    subq.l #1, d0                            ; Timeout
 _sync_token_found:
-    clr.w d0                            ; Clear the error code
-    rts
-    nop
 
+    move.l #RANDOM_TOKEN_POST_WAIT, d7
+_wait_me:
+    subq.l #1, d7                            ; Decrement the outer loop
+    bne.s _wait_me                           ; Wait for the timeout
+    tst.l BUFFER_TYPE
+    beq.s ._wait_me_restore_dskbuff
+    lea (_end_sync_code_in_stack - _start_sync_code_in_stack)(sp), sp
+._wait_me_restore_dskbuff:
+    jmp (a2)                                 ; Return to the code in the ROM
+
+    even    ; Do not remove this line
+    nop     ; Do not remove this line
+    nop     ; Do not remove this line
 _end_sync_code_in_stack:
-    rts
 
 ; Send an sync write command to the Sidecart
 ; Wait until the command sets a response in the memory with a random number used as a token
@@ -812,30 +833,34 @@ _end_sync_code_in_stack:
 ; a4: next address in the computer memory to retrieve
 ; d1-d7 are modified. a0-a3 modified.
 send_sync_write_command_to_sidecart:
+    move.l (sp)+, a0                 ; Return address
     move.l #_end_sync_write_code_in_stack - _start_sync_write_code_in_stack, d7
+    tst.l BUFFER_TYPE
+    bne.s .send_sync_write_command_to_sidecart_use_stack_buffer
+    move.l _dskbufp, a2                ; Address of the buffer to send the command
+    bra.s .send_sync_write_command_to_sidecart_continue
+.send_sync_write_command_to_sidecart_use_stack_buffer:
     lea -(_end_sync_write_code_in_stack - _start_sync_write_code_in_stack)(sp), sp
     move.l sp, a2
-    move.l sp, a3
+.send_sync_write_command_to_sidecart_continue:
+    move.l a2, a3
     lea _start_sync_write_code_in_stack, a1    ; a1 points to the start of the code in ROM
     lsr.w #2, d7
     subq #1, d7
 _copy_write_sync_code:
     move.l (a1)+, (a2)+
     dbf d7, _copy_write_sync_code
-    move.w #$4e71, (_no_async_write_return - _start_sync_write_code_in_stack)(a3)   ; Put a NOP when sync
-    jsr (a3)                                                            ; Jump to the code in the stack
-    lea (_end_sync_write_code_in_stack - _start_sync_write_code_in_stack)(sp), sp
-    rts
 
-_start_sync_write_code_in_stack:
+    move.l a0, a2                       ; Return address to a2
+
     ; The sync write command synchronize with a random token
-    move.l random_token_seed,d2
-    mulu  #221,d2
-    add.b #53, d2                       ; Save the random number in d2
+    move.l RANDOM_TOKEN_SEED_ADDR,d2
     addq.w #4, d1                       ; Add 4 bytes to the payload size to include the token
+    lsr.w #1, d4                        ; Copy two bytes each iteration
+    subq.w #1, d4                       ; one less
 
 _start_async_write_code_in_stack:
-    move.l #ROM3_START_ADDR, a0 ; Start address of the ROM3
+    move.l #ROM3_START_ADDR, a0 ; We have to keep in A0 the address of the ROM3 because we need to read from it
 
     ; SEND HEADER WITH MAGIC NUMBER
     swap d0                     ; Save the command code in the high word of d0         
@@ -878,8 +903,6 @@ _start_async_write_code_in_stack:
 
     ; SEND MEMORY BUFFER TO WRITE
  
-    lsr.w #1, d4              ; Copy two bytes each iteration
-    subq.w #1, d4             ; one less
 
     ; Test if the address in A4 is even or odd
     move.l a4, d0
@@ -907,30 +930,37 @@ _write_to_sidecart_odd_loop:
 _write_to_sidecart_end_loop:
     ; End of the command loop. Now we need to wait for the token
     swap d2                   ; D2 is the only register that is not used as a scratch register
-_no_async_write_return:
-    rts                 ; if the code is SYNC, we will NOP this
-_end_async_write_code_in_stack:
+    move.l #$000FFFFF, d7     ; Most significant word is the inner loop, least significant word is the outer loop
+    moveq #0, d0              ; Timeout
+    jmp (a3)                  ; Jump to the code in the stack
 
-    move.l #$FFFFFFFF, d7
-_wait_sync_write_for_token_a_lot:
-    swap d7
-_wait_sync_write_for_token:
-    cmp.l random_token, d2                         ; Compare the random number with the token
+; This is the code that cannot run in ROM while waiting for the command to complete
+_start_sync_write_code_in_stack:
+    cmp.l RANDOM_TOKEN_ADDR, d2                    ; Compare the random number with the token
     beq.s _sync_write_token_found                  ; Token found, we can finish succesfully
-    dbf d7, _wait_sync_write_for_token
-    swap d7
-    dbf d7, _wait_sync_write_for_token_a_lot
-_sync_write_token_not_found:
-    moveq #-1, d0                     ; Timeout
-    rts
+    subq.l #1, d7                                  ; Decrement the inner loop
+    bne.s _start_sync_write_code_in_stack          ; If the inner loop is not finished, continue
+
+    ; Sync token not found, timeout
+    subq.l #1, d0                                  ; Timeout
+
 _sync_write_token_found:
-    clr.w d0                            ; Clear the error code
-    rts
-    nop
 
+    move.l #RANDOM_TOKEN_POST_WAIT, d7
+_wait_me_write:
+    subq.l #1, d7                            ; Decrement the outer loop
+    bne.s _wait_me_write                     ; Wait for the timeout
+
+    tst.l BUFFER_TYPE
+    beq.s ._wait_me_write_restore_dskbuff
+    lea (_end_sync_write_code_in_stack - _start_sync_write_code_in_stack)(sp), sp
+._wait_me_write_restore_dskbuff:
+    jmp (a2)                                 ; Return to the code in the ROM
+
+    even    ; Do not remove this line
+    nop     ; Do not remove this line
+    nop     ; Do not remove this line
 _end_sync_write_code_in_stack:
-
-    rts
 
 
 
@@ -951,37 +981,55 @@ spacing:
         dc.b    "+" ,$d,$a,0
 
 loading_image_msg:
-        dc.b	"+- Loading the image...",$d,$a,0
+        dc.b	"+- Loading the image...", 0
 
 error_sidecart_comm_msg:
-        dc.b	"Sidecart error communication. Reset!",$d,$a,0
+        dc.b	$d, $a, "Sidecart error communication. Reset!",$d,$a,0
 
 detect_hardware_msg:
-        dc.b	"+- Detecting hardware...",$d,$a,0
+        dc.b	"+- Detecting hardware...", 0
 
 error_detect_hardware_msg:
-        dc.b	"Error detecting hardware",$d,$a,0
+        dc.b	$d, $a, "Error detecting hardware",$d,$a,0
  
 save_vectors_msg:
-        dc.b	"+- Saving the old vectors",$d,$a,0
+        dc.b	"+- Saving the old vectors...", 0
 
 error_save_vectors_msg:
-        dc.b	"Error saving the old vectors",$d,$a,0
+        dc.b	$d, $a, "Error saving the old vectors",$d,$a,0
 
 setup_BPB_msg:
-        dc.b	"+- Setting BPB of the emulated disk",$d,$a,0
+        dc.b	"+- Setting BPB of the emulated disk...",0
 
 error_setup_BPB_msg:
-        dc.b	"Error setting BPB of the emulated disk",$d,$a,0
+        dc.b	$d, $a, "Error setting BPB of the emulated disk",$d,$a,0
 
-show_disable_xbios_instructions_msg:
-    dc.b    "+- Disable XBIOS trap:",$d,$a
-    dc.b    "   Some programs may not work if",$d,$a
-    dc.b    "   the XBIOS vector is intercepted",$d,$a
-    dc.b    "   to a routine that is not the",$d,$a
-    dc.b    "   original, especially TOS 1.00",$d,$a
-    dc.b    "   and 1.02.",$d,$a,$d,$a
-    dc.b    "   Press LEFT SHIFT to disable...",0
+stack_buffer_msg:
+        dc.b	"+- Using stack as temp buffer...",0
+
+dskbuf_buffer_msg:
+        dc.b	"+- Using _dskbuf as temp buffer...",0
+
+boot_sector_disabled_msg:
+        dc.b	"+- Boot sector execution... DISABLED",$d,$a,0
+
+boot_sector_enabled_msg:
+        dc.b	"+- Boot sector execution... ENABLED",$d,$a,0
+
+init_vectors_msg:
+        dc.b	"+- Intercepting XBIOS trap...",0
+
+not_intercepting_vectors_msg:
+        dc.b	"+- Bypassing XBIOS trap...",0
+
+boot_disk_msg:
+        dc.b	"+- Booting emulated disk...",$d,$a,0
+
+backwards_msg:
+        dc.b    $8, $8,0
+
+ok_msg:
+        dc.b	"OK",$d,$a,0
 
 countdown:
 	dc.b "5",8,0
@@ -990,16 +1038,6 @@ countdown:
 	dc.b "2",8,0
 	dc.b "1",8,0
 	dc.b "0",8,0
-
-init_vectors_msg:
-        dc.b	$d,$a,"+- Intercepting XBIOS trap",$d,$a,0
-
-not_intercepting_vectors_msg:
-        dc.b	$d,$a,"+- Bypassing XBIOS trap",$d,$a,0
-
-boot_disk_msg:
-        dc.b	"+- Booting emulated disk...",0
-
 
         even
 rom_function_end:
