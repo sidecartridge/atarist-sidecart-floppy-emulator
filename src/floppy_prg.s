@@ -32,7 +32,7 @@
 
     XDEF    random_token
     XDEF    random_token_seed
-    XDEF    image
+    XDEF    sidecart_read_buf
     XDEF    BPB_data
     XDEF    old_XBIOS_trap
     XDEF    old_hdv_bpb
@@ -146,12 +146,12 @@ load_image:
         addq.l  #6, sp                  ; Correct stack
         tst.l d0                
         beq   memory_error              ; Memory error
-        move.l d0, image                ; Save start of the memory for the image
+        move.l d0, sidecart_read_buf                ; Save start of the memory for the image
     else
 ; In debug mode, we assume the 4MB of RAM in the system and we place the image at the top of the memory
         move.l  $42e.w, d0   ; Load the long-word value at address $42E into data register D0
         sub.l #(1024 * 1024 + 32768), d0      ; Subtract 32768 from the value in D0
-        move.l d0, image           ; Save start of the memory for the image after the executable
+        move.l d0, sidecart_read_buf           ; Save start of the memory for the image after the executable
     endif
 
 ; Go back at the beginning of the file
@@ -163,7 +163,7 @@ load_image:
     lea 10(sp), sp                  ; Correct stack
 
 ; Now read the file content into memory
-    move.l  image,-(sp)                ; Destination buffer
+    move.l  sidecart_read_buf,-(sp)                ; Destination buffer
     move.l  image_length,-(sp)      ; Number of bytes to read
     move.w  image_handle,-(sp)      ; File handle
     move.w  #$3f,-(sp)              ; GEMDOS function Fread
@@ -204,7 +204,7 @@ load_image:
 ; Output registers:
 ;  none
 do_transfer_ramdisk:
-    move.l image,a1             ; Disk start.  (bootsector)
+    move.l sidecart_read_buf,a1             ; Disk start.  (bootsector)
     clr.l  d7
     move.w d0, d7               ; Calculate the address of the sector to read/write
     mulu d2, d7                 ; Sector size x logical sector number to get the mem address
@@ -288,7 +288,7 @@ exit_failure:
 ; But it should be implemented in the RP2040 side and prepare all the
 ; data structures ready to be consumed Read Only by the ATARI ST side
 setBPB:
-        move.l  image, a0
+        move.l  sidecart_read_buf, a0
         lea     BPB_data+2, a1
         clr.l   d0
         move.b  13(a0),d0   ; Sect/clust
@@ -446,7 +446,7 @@ old_hdv_rw:         dc.l 0
 old_hdv_mediach:    dc.l 0
 old_XBIOS_trap:     dc.l 0
 
-image:              ds.l 1
+sidecart_read_buf:              ds.l 1
 image_length:       ds.l 1
 image_handle:       ds.w 1
 
