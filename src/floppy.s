@@ -623,8 +623,9 @@ _error_reading_sector:
     rts
 _copy_sector_byte_odd:
     move.b (a1)+, (a0)+
-    move.b (a1)+, (a0)+
-    move.b (a1)+, (a0)+
+    ;move.b (a1)+, (a0)+
+    ;move.b (a1)+, (a0)+
+    move.w (a1)+, (a0)+
     move.b (a1)+, (a0)+
     dbf d4, _copy_sector_byte_odd
     clr.w d0                    ; Clear the error code
@@ -864,30 +865,26 @@ _start_async_write_code_in_stack:
 
     ; SEND PAYLOAD SIZE
     move.l a0, d0               ; Address of the ROM3 in d0    
-    or.w d1, d0                 ; OR high and low words in d0
+    move.w d1, d0                 ; OR high and low words in d0
     move.l d0, a1               ; move to a1 ready to read from this address
     move.b (a1), d0             ; Command payload size. d0 is a scratch register
 
     ; SEND PAYLOAD
-    move.l a0, d0
-    or.w d2, d0
+    move.w d2, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d2
 
     swap d2
-    move.l a0, d0
-    or.w d2, d0
+    move.w d2, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d2
 
-    move.l a0, d0
-    or.w d3, d0
+    move.w d3, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d3
 
     swap d3
-    move.l a0, d0
-    or.w d3, d0
+    move.w d3, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d3
 
