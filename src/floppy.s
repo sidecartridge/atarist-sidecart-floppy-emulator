@@ -623,8 +623,9 @@ _error_reading_sector:
     rts
 _copy_sector_byte_odd:
     move.b (a1)+, (a0)+
-    move.b (a1)+, (a0)+
-    move.b (a1)+, (a0)+
+    ;move.b (a1)+, (a0)+
+    ;move.b (a1)+, (a0)+
+    move.w (a1)+, (a0)+
     move.b (a1)+, (a0)+
     dbf d4, _copy_sector_byte_odd
     clr.w d0                    ; Clear the error code
@@ -709,83 +710,73 @@ _start_async_code_in_stack:
 
     ; SEND PAYLOAD SIZE
     move.l a0, d0               ; Address of the ROM3 in d0    
-    or.w d1, d0                 ; OR high and low words in d0
+    move.w d1, d0                 ; OR high and low words in d0
     move.l d0, a1               ; move to a1 ready to read from this address
     move.b (a1), d0             ; Command payload size. d0 is a scratch register
     tst.w d1
     beq _no_more_payload_stack        ; If the command does not have payload, we are done.
 
     ; SEND PAYLOAD
-    move.l a0, d0
-    or.w d2, d0
+    move.w d2, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d2
     cmp.w #2, d1
     beq _no_more_payload_stack
 
     swap d2
-    move.l a0, d0
-    or.w d2, d0
+    move.w d2, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d2
     cmp.w #4, d1
     beq _no_more_payload_stack
 
-    move.l a0, d0
-    or.w d3, d0
+    move.w d3, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d3
     cmp.w #6, d1
     beq _no_more_payload_stack
 
     swap d3
-    move.l a0, d0
-    or.w d3, d0
+    move.w d3, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d3
     cmp.w #8, d1
     beq _no_more_payload_stack
 
-    move.l a0, d0
-    or.w d4, d0
+    move.w d4, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d4
     cmp.w #10, d1
     beq _no_more_payload_stack
 
     swap d4
-    move.l a0, d0
-    or.w d4, d0
+    move.w d4, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d4
     cmp.w #12, d1
     beq.s _no_more_payload_stack
 
-    move.l a0, d0
-    or.w d5, d0
+    move.w d5, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d5
     cmp.w #14, d1
     beq.s _no_more_payload_stack
 
     swap d5
-    move.l a0, d0
-    or.w d5, d0
+    move.w d5, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d5
     cmp.w #16, d1
     beq.s _no_more_payload_stack
 
-    move.l a0, d0
-    or.w d6, d0
+    move.w d6, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d6
     cmp.w #18, d1
     beq.s _no_more_payload_stack
 
     swap d6
-    move.l a0, d0
-    or.w d6, d0
+    move.w d6, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d6
 
@@ -874,30 +865,26 @@ _start_async_write_code_in_stack:
 
     ; SEND PAYLOAD SIZE
     move.l a0, d0               ; Address of the ROM3 in d0    
-    or.w d1, d0                 ; OR high and low words in d0
+    move.w d1, d0                 ; OR high and low words in d0
     move.l d0, a1               ; move to a1 ready to read from this address
     move.b (a1), d0             ; Command payload size. d0 is a scratch register
 
     ; SEND PAYLOAD
-    move.l a0, d0
-    or.w d2, d0
+    move.w d2, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d2
 
     swap d2
-    move.l a0, d0
-    or.w d2, d0
+    move.w d2, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d2
 
-    move.l a0, d0
-    or.w d3, d0
+    move.w d3, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload low d3
 
     swap d3
-    move.l a0, d0
-    or.w d3, d0
+    move.w d3, d0
     move.l d0, a1
     move.b (a1), d0           ; Command payload high d3
 
@@ -909,23 +896,47 @@ _start_async_write_code_in_stack:
     btst #0, d0
     beq.s _write_to_sidecart_even_loop
 _write_to_sidecart_odd_loop:
+    move.l a0, d0
+_write_to_sidecart_odd_loop2:
     move.b  (a4)+, d3       ; Load the high byte
     lsl.w   #8, d3          ; Shift it to the high part of the word
     move.b  (a4)+, d3       ; Load the low byte
-    move.l a0, d0
-    or.w d3, d0
+    move.w d3, d0
     move.l d0, a1
     move.b (a1), d0           ; Write the memory to the sidecart
-    dbf d4, _write_to_sidecart_odd_loop
+    dbf d4, _write_to_sidecart_odd_loop2
     bra.s _write_to_sidecart_end_loop
 
  _write_to_sidecart_even_loop:
-    move.w (a4)+, d3        ; Load the word
     move.l a0, d0
-    or.w d3, d0
+    cmp.l #4, d6
+    blt _write_to_sidecart_even_loop2
+
+    move.l d6, d1                        ; Use D1 as loop counter for the unrolled amount
+    lsr.l #2, d1                         ; Divide the number of words by 4
+    and.l #$3, d6                        ; remaining amount of words in d6
+    subq.l #1, d1                        ; We need to copy one byte less because dbf counts 0
+
+ _write_to_sidecart_even_loop_unroll_by4:        ; 4x unrolled loop
+    move.w (a4)+, d0          ; Load the word
     move.l d0, a1
     move.b (a1), d0           ; Write the memory to the sidecart
-    dbf d4, _write_to_sidecart_even_loop
+    move.w (a4)+, d0          ; Load the word
+    move.l d0, a1
+    move.b (a1), d0           ; Write the memory to the sidecart
+    move.w (a4)+, d0          ; Load the word
+    move.l d0, a1
+    move.b (a1), d0           ; Write the memory to the sidecart
+    move.w (a4)+, d0          ; Load the word
+    move.l d0, a1
+    move.b (a1), d0           ; Write the memory to the sidecart
+    dbf d1, _write_to_sidecart_even_loop_unroll_by4
+    
+ _write_to_sidecart_even_loop2:
+    move.w (a4)+, d0        ; Load the word
+    move.l d0, a1
+    move.b (a1), d0           ; Write the memory to the sidecart
+    dbf d4, _write_to_sidecart_even_loop2
 
 _write_to_sidecart_end_loop:
     ; End of the command loop. Now we need to wait for the token
