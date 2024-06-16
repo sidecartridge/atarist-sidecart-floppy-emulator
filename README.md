@@ -1,14 +1,14 @@
-# ATARI ST Sidecart Floppy Emulator Firmware
+# ATARI ST SidecarTridge Multi-device Floppy Emulator Firmware
 
-This repository hosts the firmware code for the Sidecart Floppy Emulator designed for Atari ST/STE/Mega systems. In tandem with the [Sidecart Raspberry Pico firmware](https://github.com/diegoparrilla/atarist-sidecart-raspberry-pico), this firmware facilitates the functioning of the Sidecart Floppy Emulator.
+This repository hosts the firmware code for the SidecarTridge Multi-device Floppy Emulator designed for Atari ST/STE/Mega systems. In tandem with the [SidecarTridge Multi-device Raspberry Pico firmware](https://github.com/sidecartridge/atarist-sidecart-raspberry-pico), this firmware facilitates the functioning of the SidecarTridge Multi-device Floppy Emulator.
 
 ## Introduction
 
-The Sidecart ROM Emulator simulates the function of Atari ST cartridges, including their contained ROM memory, in line with classic TOS Atari ST applications, as prepared by the code in this repository. However, the functionality of Sidecart extends beyond the realm of simple ROM emulation; it also has the capacity to perform various additional operations.
+The  functionality of SidecarTridge Multi-device extends beyond the realm of simple ROM emulation; it also has the capacity to perform various additional operations.
 
-One notable feature of Sidecart is its ability to emulate Floppy Drives. This is executed efficiently; it does not consume any system RAM space. The driver needed for this emulation is exclusively located in the cartridge ROM, ensuring that system resources are used optimally and system performance is maintained.
+One notable feature of SidecarTridge Multi-device is its ability to emulate Floppy Drives. This is executed efficiently; it does not consume any system RAM space. The driver needed for this emulation is exclusively located in the cartridge ROM, ensuring that system resources are used optimally and system performance is maintained.
 
-This added functionality means that Sidecart can be used not just for straightforward ROM emulation, but also for managing additional, practical functionalities, broadening its utility and effectiveness in different use cases related to Atari ST systems.
+This added functionality means that SidecarTridge Multi-device can be used not just for straightforward ROM emulation, but also for managing additional, practical functionalities, broadening its utility and effectiveness in different use cases related to Atari ST systems.
 
 The source is bifurcated into:
 
@@ -18,15 +18,15 @@ The source is bifurcated into:
 
 There is also a third file in `src` called `floppy_prg.s` created for testing purposes in emulators, for example.
 
-**Note**: This ROM cannot be loaded or emulated like conventional ROMs. It has to be merged directly into the Sidecart RP2040 ROM Emulator firmware. Additional details are available in the [Sidecart Raspberry Pico firmware](https://github.com/diegoparrilla/atarist-sidecart-raspberry-pico).
+**Note**: This ROM cannot be loaded or emulated like conventional ROMs. It has to be merged directly into the SidecarTridge Multi-device RP2040 firmware. Additional details are available in the [SidecarTridge Multi-device Raspberry Pico firmware](https://github.com/sidecartridge/atarist-sidecart-raspberry-pico).
 
-Newcomers to Sidecart are encouraged to peruse the official [Sidecart ROM Emulator website](https://sidecartridge.com) for a comprehensive understanding.
+Newcomers to SidecarTridge Multi-device are encouraged to peruse the official [SidecarTridge Multi-device Emulator website](https://sidecartridge.com) for a comprehensive understanding.
 
 ## Requirements
 
 - An Atari ST/STE/MegaST/MegaSTE computer. You can also use an emulator such as Hatari or STEEM for testing purposes, but you cannot really test the floppy emulation functionality there.
 
-- The [atarist-toolkit-docker](https://github.com/diegoparrilla/atarist-toolkit-docker) is pivotal. Familiarize yourself with its installation and usage.
+- The [atarist-toolkit-docker](https://github.com/sidecartridge/atarist-toolkit-docker) is pivotal. Familiarize yourself with its installation and usage.
 
 - A `git` client, command line or GUI, your pick.
 
@@ -39,7 +39,7 @@ You don't really need an Atari ST to build the binaries, just follow these steps
 1. Clone this repository:
 
 ```
-$ git clone https://github.com/diegoparrilla/atarist-sidecart-floppy-emulator.git
+$ git clone https://github.com/sidecartridge/atarist-sidecart-floppy-emulator.git
 ```
 
 2. Navigate to the cloned repository:
@@ -54,18 +54,18 @@ cd atarist-sidecart-floppy-emulator
 ./build.sh
 ```
 
-4. The `dist` folder now houses the binary files: `FLOPPY.BIN`, which needs to be incorporated into the Sidecart RP2040 ROM Emulator firmware, and `FLOPPY.IMG`, a raw binary file tailored for direct emulation by SidecarT (intended for testing).
+4. The `dist` folder now houses the binary files: `FLOPPY.BIN`, which needs to be incorporated into the SidecarTridge Multi-device RP2040 firmware, and `FLOPPY.IMG`, a raw binary file tailored for direct emulation (intended for testing).
 
 ## Developing the Floppy emulator
 
-For those inclined to tweak the ROM loader, it's possible. The Floppy emulator is crafted in 68000 assembly and compiles via the [atarist-toolkit-docker](https://github.com/diegoparrilla/atarist-toolkit-docker).
+For those inclined to tweak the ROM loader, it's possible. The Floppy emulator is crafted in 68000 assembly and compiles via the [atarist-toolkit-docker](https://github.com/sidecartridge/atarist-toolkit-docker).
 
 For illustration, let's use the Hatari emulator on macOS:
 
 1. Begin by ensuring the repository is cloned. If not:
 
 ```
-$ git clone https://github.com/diegoparrilla/atarist-sidecart-floppy-emulator.git
+$ git clone https://github.com/sidecartridge/atarist-sidecart-floppy-emulator.git
 ```
 
 2. Enter the cloned repository:
@@ -80,7 +80,7 @@ cd atarist-sidecart-floppy-emulator
 export ST_WORKING_FOLDER=<ABSOLUTE_PATH_TO_THE_FOLDER_WHERE_YOU_CLONED_THE_REPO>
 ```
 
-4. Embark on your code modifications within the `/src` folder. For insights on leveraging the environment, refer to the [atarist-toolkit-docker](https://github.com/diegoparrilla/atarist-toolkit-docker) examples.
+4. Embark on your code modifications within the `/src` folder. For insights on leveraging the environment, refer to the [atarist-toolkit-docker](https://github.com/sidecartridge/atarist-toolkit-docker) examples.
 
 5. Leverage the provided Makefile for the build. The `stcmd` command connects with the tools in the Docker image. Engage the `_DEBUG` flag (set to 1) to activate debug messages and bypass direct ROM usage. There is also a `RELEASE_MODE` flag to enable construction for the final release. For example, to build the ROM in debug mode in an emulator this command will build a TOS file with testing data (loads an image in RAM):
 
@@ -88,7 +88,7 @@ export ST_WORKING_FOLDER=<ABSOLUTE_PATH_TO_THE_FOLDER_WHERE_YOU_CLONED_THE_REPO>
 stcmd make DEBUG_MODE=1 RELEASE_MODE=0
 ```
 
-If you want to build a TOS file for testing with a Sidecart and an Atari ST computer, run this:
+If you want to build a TOS file for testing with a SidecarTridge Multi-device and an Atari ST computer, run this:
 
 ```
 stcmd make DEBUG_MODE=1 RELEASE_MODE=1
@@ -108,14 +108,14 @@ hatari --fast-boot true --tos-res med dist/ROMLOAD.TOS &
 
 ## Releases
 
-For releases, head over to the [Releases page](https://github.com/diegoparrilla/atarist-sidecart-floppy-emulator/releases). The latest release is always recommended.
+For releases, head over to the [Releases page](https://github.com/sidecartridge/atarist-sidecart-floppy-emulator/releases). The latest release is always recommended.
 
-Note: The build output isn't akin to standard ROM images. The release files have to be incorporated into the Sidecart RP2040 ROM Emulator firmware.
+Note: The build output isn't akin to standard ROM images. The release files have to be incorporated into the SidecarTridge Multi-device RP2040 firmware.
 
 ## Resources 
 
-- [Sidecart ROM Emulator website](https://sidecartridge.com)
-- [Sidecart Raspberry Pico firmware](https://github.com/diegoparrilla/atarist-sidecart-raspberry-pico) - Where the second phase of the Sidecart ROM Emulator firmware evolution unfolds.
+- [SidecarTridge Multi-device Emulator website](https://sidecartridge.com)
+- [SidecarTridge Multi-device Raspberry Pico firmware](https://github.com/sidecartridge/atarist-sidecart-raspberry-pico) - Where the second phase of the SidecarTridge Multi-device firmware evolution unfolds.
 
 ## License
 

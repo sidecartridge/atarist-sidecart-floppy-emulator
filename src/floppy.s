@@ -966,7 +966,8 @@ _end_sync_write_code_in_stack:
 
 
 floppy_emulator_msg:
-        dc.b	"SidecarT Floppy Emulator - "
+        dc.b	"SidecarTridge Multi-device",$d,$a
+        dc.b    "Floppy Emulator - "
         
 version:
         dc.b    "v"
@@ -984,7 +985,7 @@ loading_image_msg:
         dc.b	"+- Loading the image...", 0
 
 error_sidecart_comm_msg:
-        dc.b	$d, $a, "Sidecart error communication. Reset!",$d,$a,0
+        dc.b	$d, $a, "Communication error. Reset!",$d,$a,0
 
 detect_hardware_msg:
         dc.b	"+- Detecting hardware...", 0
