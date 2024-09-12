@@ -1,5 +1,5 @@
-; SidecarT NetRiser - An extension to Atari ST computers through the cartridge port
-; Copyright (C) 2023 Diego Parrilla Santamaría
+; SidecarTridge Multi-device - An extension to Atari ST computers through the cartridge port
+; Copyright (C) 2023-24 GOODDATA LABS SL
 ;
 
 ; TOS macros, definitions and constants 
@@ -11,7 +11,7 @@ syscall	macro
 
 	ifnc	'','\3'                 ; If a stack rewind parameter is passed
 	ifgt	\3-8                    ;
-	lea	\3(sp),sp               ; Rewind the stack
+	lea	\3(sp),sp                   ; Rewind the stack
 	elseif                          ;
 	addq.l	#\3,sp                  ; Rewind using addq
 	endc                            ;
@@ -55,6 +55,78 @@ pchar	macro	; Print a character
 	addq.l	#4,sp
 	endm
 
+; Print a character from a register d0.b
+pchar_reg	macro			; Print a character
+			andi.l #$00FF, d0		; Clear d0 to use it for calculations
+			move.w	d0,-(sp)
+			gemdos	Cconout,4
+			endm
+
+; Macro to print a number between 0 and 99
+; Number must be in d0.b
+print_num	macro
+
+	andi.l #$00FF, d0		; Clear d0 to use it for calculations
+
+	; Extract tens digit
+	divu.w	#$A, d0			; Divide by 10, quotient in MSB.w, remainder in LSB.w
+	andi.l #$00FF00FF,d0 	; Keep only the quotient and remainder
+	addi.l #$00300030,d0 	; Convert to ASCII both
+	swap 	d0				; Swap to get the remainder
+	move.w d0, -(sp)		; Push remainder
+	swap	d0				; Swap to get the quotient
+	move.w  d0, -(sp)		; Push tens digit
+	move.w  #2, -(sp)		; Push 2 bytes to print
+	trap #1					; Print tens digit
+	addq.l	#4, sp			; Rewind stack
+
+	; Extract ones digit
+	; We have already pushed into the stack the remainder of the previous division
+	move.w  #2, -(sp)		; Push 2 bytes to print
+	trap #1					; Print ones digit
+	addq.l	#4, sp			; Rewind stack
+
+	endm
+
+; Macro to print an hex number between 0 and 255
+; Number must be in d0.l
+; Number of nibbles to print must be in d1.l
+print_hex 	macro
+    movem.l d0-d7, -(sp)     ; Push all registers
+    move.l  d0, d6           ; Copy D0 to D6 for manipulation
+    rol.l #8, d6             ; Shift right by 8 bits to get the next byte
+;    moveq   #7, d1           ; Counter for 8 nibbles (32 bits / 4 bits per nibble)
+
+.\@print_next_nibble:
+    move.l  d6, d3           ; Copy D2 to D3 to extract the nibble
+    btst    #0, d1           ;
+    beq.s   .\@print_low_nibble ; If the counter is even, print the low nibble
+.\@print_high_nibble:
+    lsr.l   #4, d3           ; Shift right by 4 bits to get the high nibble
+    bra.s .\@print_nibble
+.\@print_low_nibble:
+    rol.l #8, d6             ; Shift right by 8 bits to get the next byte
+.\@print_nibble:
+    andi.l  #$0F, d3         ; Mask off all but the lower nibble
+    cmpi.l  #$0A, d3         ; Compare with 10 to determine if it's A-F
+    blt.s   .\@digit            ; If less than 10, it's a digit
+    addi.l  #$37, d3         ; Convert to ASCII ('A' - 'F')
+    bra.s   .\@print_char
+.\@digit:
+    addi.l  #$30, d3        ; Convert to ASCII ('0' - '9')
+.\@print_char:
+    move.w  d3, -(sp)        ; Push the character to print
+    move.w  #2, -(sp)		; Push 2 bytes to print
+    trap    #1               ; Print char
+    addq.l  #4, sp           ; Rewind stack
+
+    dbra    d1, .\@print_next_nibble  ; Decrement d1 and branch if not yet zero
+
+    movem.l  (sp)+, d0-d7     ; Pop all registers
+
+    endm
+
+
 pchar2	macro
 	movem.l	d0-d2/a0-a2,-(sp)
 	pchar	\1
@@ -91,6 +163,7 @@ asksil	macro	; Ask silently: print a message and wait for a key
 Cconin		EQU	1
 Cconout		EQU	2
 Cauxout		EQU	4
+Crawio		EQU	6
 Crawcin		EQU	7
 Cnecin		EQU	8
 Cconws		EQU	9
@@ -106,6 +179,7 @@ Tsettime	EQU	45
 Fgetdta		EQU	47
 Sversion	EQU	48
 Ptermres	EQU	49
+Dfree		EQU	54
 Dcreate		EQU	57
 Ddelete		EQU	58
 Dsetpath	EQU	59
