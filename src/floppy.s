@@ -25,14 +25,18 @@
         XREF    random_token
         XREF    random_token_seed
         XREF    sidecart_read_buf
-        XREF    BPB_data
+        XREF    BPB_data_A
+        XREF    BPB_data_B
         XREF    old_XBIOS_trap
         XREF    old_hdv_bpb
         XREF    old_hdv_rw
         XREF    old_hdv_mediach
-        XREF    disk_number
-        XREF    secptrack
-        XREF    secpcyl
+        XREF    disk_number_A
+        XREF    secptrack_A
+        XREF    secpcyl_A
+        XREF    disk_number_B
+        XREF    secptrack_B
+        XREF    secpcyl_B
 
         include inc/tos.s
         include inc/debug.s
@@ -41,25 +45,52 @@
         sidecart_read_buf:   equ (ROM3_START_ADDR + $1000) ; random_token + $1000 bytes
         random_token:        equ ROM3_START_ADDR ; ROM3_START_ADDR + 0 bytes
         random_token_seed:   equ (random_token + 4) ; random_token + 0 bytes
-        BOOT_SECTOR_ENABLED: equ (random_token_seed + 4) ; random_token + 4 bytes
-        BUFFER_TYPE:         equ (BOOT_SECTOR_ENABLED + 4)       ; boot_sector_enabled + 4 byte
-        XBIOS_ENABLED:       equ (BUFFER_TYPE + 4)             ; buffer_type + 4 bytes
+        BUFFER_TYPE:         equ (random_token_seed + 4)       ; random_token_seed + 4 byte
 
-        BPB_data:            equ (XBIOS_ENABLED + 4) ; XBIOS enabled + 4 bytes
-        trackcnt:            equ BPB_data + 18 ; BPB_data + 18 bytes
-        sidecnt:             equ trackcnt + 2 ; trackcnt + 2 bytes
-        secpcyl:             equ sidecnt + 2 ; sidecnt + 2 bytes
-        secptrack:           equ secpcyl + 2 ; secpcyl + 2 bytes
-        disk_number:         equ secptrack + 8 ; secptrack + 8 bytes
-        old_XBIOS_trap:      equ disk_number + 2 ; disk_number + 2 bytes
+        BPB_data_A:            equ (BUFFER_TYPE + 4) ; Buffer type + 4 bytes
+        trackcnt_A:            equ BPB_data_A + 18 ; BPB_data + 18 bytes
+        sidecnt_A:             equ trackcnt_A + 2 ; trackcnt + 2 bytes
+        secpcyl_A:             equ sidecnt_A + 2 ; sidecnt + 2 bytes
+        secptrack_A:           equ secpcyl_A + 2 ; secpcyl + 2 bytes
+        disk_number_A:         equ secptrack_A + 8 ; secptrack + 8 bytes
+
+        BPB_data_B:            equ (disk_number_A + 2) ; disk_number_A + 4 bytes
+        trackcnt_B:            equ BPB_data_B + 18 ; BPB_data + 18 bytes
+        sidecnt_B:             equ trackcnt_B + 2 ; trackcnt + 2 bytes
+        secpcyl_B:             equ sidecnt_B + 2 ; sidecnt + 2 bytes
+        secptrack_B:           equ secpcyl_B + 2 ; secpcyl + 2 bytes
+        disk_number_B:         equ secptrack_B + 8 ; secptrack + 8 bytes
+
+
+        old_XBIOS_trap:      equ disk_number_B + 6 ; disk_number + 4 bytes +  2 bytes alignment
         old_hdv_bpb:         equ old_XBIOS_trap + 4 ; old_XBIOS_trap + 4 bytes
         old_hdv_rw:          equ old_hdv_bpb + 4 ; old_hdv_bpb + 4 bytes
         old_hdv_mediach:     equ old_hdv_rw + 4 ; old_hdv_rw + 4 bytes
         hardware_type:       equ old_hdv_mediach + 4 ; old_hdv_mediach + 4 bytes
+
+        read_checksum:       equ hardware_type + 4 ; network_timeout_sec + 4 bytes
+
+        IP_ADDRESS:          equ read_checksum + 4   ; read_checksum + 4 bytes
+        HOSTNAME:            equ IP_ADDRESS + 128    ; ip_address + 128 bytes
+
+        SHARED_VARIABLES:    equ random_token + 512         ; random token + 512 bytes to the shared variables area
+
+        SVAR_DO_TRANSFER:    equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 0             ; Entry address of the transfer function
+        SVAR_EXIT_TRANSFER:  equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 1             ; Exit address of the transfer function
+        SVAR_XBIOS_TRAP_ENABLED: equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 2          ; XBIOS trap enabled
+        SVAR_BOOT_ENABLED:   equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 3             ; Boot sector enabled
+        SVAR_PING_STATUS:    equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 4          ; Ping status
+        SVAR_PING_TIMEOUT:   equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 5          ; Ping timeout
+
+        SVAR_MEDIA_CHANGED_A:   equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 6       ; Media changed A
+        SVAR_MEDIA_CHANGED_B:   equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 7       ; Media changed B
+        SVAR_EMULATION_MODE:    equ SHARED_VARIABLE_SHARED_FUNCTIONS_SIZE + 8       ; Emulation mode
+
     endif
 
 ; CONSTANTS
 XBIOS_trap      equ $b8     ; TRAP #14 Handler (XBIOS)
+_membot         equ $432    ; This value represents last memory used by the TOS, and start of the heap area available
 _bootdev        equ $446    ; This value represents the device from which the system was booted (0 = A:, 1 = B:, etc.)
 
 hdv_bpb         equ $472    ; This vector is used when Getbpb() is called. A value of 0 indicates that no hard disk is attached.
@@ -68,28 +99,37 @@ hdv_mediach     equ $47e    ; This vector is used when Mediach() is called. A va
 _nflops         equ $4a6    ; This value indicates the number of floppy drives currently connected to the system
 _drvbits        equ $4c2    ; Each of 32 bits in this longword represents a drive connected to the system. Bit #0 is A, Bit #1 is B and so on.
 _dskbufp        equ $4c6    ; Address of the disk buffer pointer    
+_longframe      equ $59e    ; Address of the long frame flag. If this value is 0 then the processor uses short stack frames, otherwise it uses long stack frames.
 
 
 RANDOM_SEED     equ $1284FBCD ; Random seed for the random number generator. Should be provided by the pico in the future
-PING_WAIT_TIME  equ 8         ; Number of seconds (aprox) to wait for a ping response from the Sidecart. Power of 2 numbers. Max 127.
 
 ROM_EXCHG_BUFFER_ADDR equ (ROM3_START_ADDR)               ; ROM3 buffer address
 RANDOM_TOKEN_ADDR:        equ (ROM_EXCHG_BUFFER_ADDR)
 RANDOM_TOKEN_SEED_ADDR:   equ (RANDOM_TOKEN_ADDR + 4) ; RANDOM_TOKEN_ADDR + 0 bytes
 RANDOM_TOKEN_POST_WAIT:   equ $64        ; Wait this cycles after the random number generator is ready
+WRITE_COMMAND_RETRIES:    equ 3          ; Number of retries to send a command to the RP2040
+
 
 CMD_MAGIC_NUMBER    equ (ROM3_START_ADDR + $ABCD)   ; Magic number to identify a command
 APP_FLOPPYEMUL      equ $0200                       ; MSB is the app code. Floppy emulator is $02
 CMD_SAVE_VECTORS    equ ($0 + APP_FLOPPYEMUL)     ; Command code to save the old vectors
-CMD_SET_BPB         equ ($1 + APP_FLOPPYEMUL)     ; Command code to set the BPB of the emulated disk
-CMD_READ_SECTOR     equ ($2 + APP_FLOPPYEMUL)     ; Command code to read a sector from the emulated disk
-CMD_WRITE_SECTOR    equ ($3 + APP_FLOPPYEMUL)     ; Command code to write a sector to the emulated disk
-CMD_PING            equ ($4 + APP_FLOPPYEMUL)     ; Command code to ping to the Sidecart
-CMD_SAVE_HARDWARE   equ ($5 + APP_FLOPPYEMUL)     ; Command code to save the hardware type of the ATARI computer
+CMD_READ_SECTOR     equ ($1 + APP_FLOPPYEMUL)     ; Command code to read a sector from the emulated disk
+CMD_WRITE_SECTOR    equ ($2 + APP_FLOPPYEMUL)     ; Command code to write a sector to the emulated disk
+CMD_PING            equ ($3 + APP_FLOPPYEMUL)     ; Command code to ping to the Sidecart
+CMD_SAVE_HARDWARE   equ ($4 + APP_FLOPPYEMUL)     ; Command code to save the hardware type of the ATARI computer
+CMD_SET_SHARED_VAR  equ ($5 + APP_FLOPPYEMUL)     ; Command code to set a shared variable
+CMD_RESET           equ ($6 + APP_FLOPPYEMUL)     ; Command code to reset the floppy emulator before starting the boot process
+CMD_MOUNT_DRIVE_A   equ ($7 + APP_FLOPPYEMUL)     ; Mount the drive A of the floppy emulator
+CMD_UNMOUNT_DRIVE_A equ ($8 + APP_FLOPPYEMUL)     ; Unmount the drive A of the floppy emulator
+CMD_MOUNT_DRIVE_B   equ ($9 + APP_FLOPPYEMUL)     ; Mount the drive B of the floppy emulator
+CMD_UNMOUNT_DRIVE_B equ ($A + APP_FLOPPYEMUL)     ; Unmount the drive B of the floppy emulator
+CMD_SHOW_VECTOR_CALL equ ($B + APP_FLOPPYEMUL)    ; Command code to show the XBIOS vector call 
 
     ifne _RELEASE
         include inc/tos.s
     endif
+    include inc/sidecart_macros.s
 
 	section code
 
@@ -99,40 +139,154 @@ CMD_SAVE_HARDWARE   equ ($5 + APP_FLOPPYEMUL)     ; Command code to save the har
 rom_function:
     print floppy_emulator_msg
 
-    ifeq _DEBUG
-    move.w #3, d7           ; retries of the ping command
-_ping_retry:
-    move.w d7, -(sp)
-    print loading_image_msg
-    bsr ping
-    move.w (sp)+, d7
-    tst.w d0
-    beq.s _ping_ok
-    dbf d7, _ping_retry
+    ; Test if the floppy emulator was configured, if so, reset it
+    tst.l (SHARED_VARIABLES + (SVAR_PING_STATUS * 4))
+    beq.s _reset_bypass    
+    send_sync CMD_RESET,0
 
-    asksil error_sidecart_comm_msg
-    endif
+_reset_bypass:
+    ifeq _DEBUG
+    print loading_image_msg
+    move.l (SHARED_VARIABLES + (SVAR_PING_TIMEOUT * 4))  , d7      ; retries of the ping command
+_ping_retry:
+
+    print xbios_params_msg
+    tst.l (SHARED_VARIABLES + (SVAR_XBIOS_TRAP_ENABLED * 4))       ; 0: XBIOS trap disabled, Not 0: XBIOS trap enabled 
+    beq.s _ping_disable_xbios_trap
+    print on_msg
+    bra.s _ping_bootsec
+_ping_disable_xbios_trap:
+    print off_msg
+
+_ping_bootsec:
+    print boot_params_msg
+    tst.l (SHARED_VARIABLES + (SVAR_BOOT_ENABLED * 4))
+    beq.s _ping_boot_sector_disabled
+    print on_msg
+    bra.s _ping_memory_buff
+_ping_boot_sector_disabled:
+    print off_msg
+
+_ping_memory_buff:
+    print memory_buff_msg
+    tst.l (SHARED_VARIABLES + (SHARED_VARIABLE_BUFFER_TYPE * 4))
+    beq.s _ping_memory_buff_diskbuf
+    print memory_buff_stack_msg
+    bra.s _ping_web
+_ping_memory_buff_diskbuf:
+    print memory_buff_dskbuf_msg
+
+_ping_web:
+    tst.b IP_ADDRESS
+    beq.s _ping_noweb
+    print cr
+    print web_ip_msg
+    pea	IP_ADDRESS
+	gemdos	Cconws,6
+    print web_host_msg
+    pea HOSTNAME
+    gemdos	Cconws,6
+    print web_drive_msg
+    print cr
+    bra.s _ping_continue
+_ping_noweb:
+    print cr
+    print cr
+    print cr
+
+    ; Test with the PING command if the RP2040 is ready to serve or not
+_ping_continue:
+    move.w d7, -(sp)
+    send_sync CMD_PING, 0
+    move.w (sp)+, d7
+    tst.l (SHARED_VARIABLES + (SVAR_PING_STATUS * 4))
+    beq.s _ping_configuring
+    print boot_ready_msg
+    bra.s _ping_configuration_ready
+_ping_configuring:
+    print boot_wait_msg
+_ping_configuration_ready:
+
+    ; Show the count down message
+    print boot_countdown_msg
+    move.w d7,d0                    ; Pass the number of seconds to print
+    print_num                       ; Print the decimal number
+    print boot_countdown_secs_msg
+    print backwards_msg
+    move.w d7, -(sp)                ; Save the number of seconds to wait    
+
+    wait_sec_or_key_press
+
+    cmp.b #'x', d0                  ; Check if 'x' is pressed otherwise continue
+    bne.s _ping_check_boot
+
+    ; Toogle the XBIOS trap
+    move.l #SVAR_XBIOS_TRAP_ENABLED, d3
+    move.l (SHARED_VARIABLES + (SVAR_XBIOS_TRAP_ENABLED * 4)), d4
+    not.l d4
+    send_sync CMD_SET_SHARED_VAR, 8
+    bra.s _ping_ok
+
+_ping_check_boot:
+    cmp.b #'b', d0                  ; Check if 'b' is pressed otherwise continue
+    bne.s _ping_check_mem_type
+
+    ; Toogle the BOOT trap
+    move.l #SVAR_BOOT_ENABLED, d3
+    move.l (SHARED_VARIABLES + (SVAR_BOOT_ENABLED * 4)), d4
+    not.l d4
+    send_sync CMD_SET_SHARED_VAR, 8
+    bra.s _ping_ok
+
+_ping_check_mem_type:
+    cmp.b #'m', d0                  ; Check if 'm' is pressed otherwise continue
+    bne.s _ping_check_esc
+
+    ; Toogle the Memory buffer type
+    move.l #SHARED_VARIABLE_BUFFER_TYPE, d3
+    move.l (SHARED_VARIABLES + (SHARED_VARIABLE_BUFFER_TYPE * 4)), d4
+    not.l d4
+    send_sync CMD_SET_SHARED_VAR, 8
+    bra.s _ping_ok
+
+_ping_check_esc:
+    cmp.b #27,d0                    ; Check if ESC is pressed and continue
+    beq.s _ping_check_final_status
 
 _ping_ok:
-    print ok_msg
+    print boot_up_msg
+    move.w (sp)+, d7                ; Restore the number of retries
+    dbf d7, _ping_retry
+    bra.s _ping_check_ready_to_save_vectors
+
+_ping_check_final_status:
+    move.w (sp)+, d7                ; Restore the number of retries
+_ping_check_ready_to_save_vectors:
+    ; Test if it is intialized or not
+    send_sync CMD_PING, 0
+    tst.l (SHARED_VARIABLES + (SVAR_PING_STATUS * 4))
+    bne.s _save_vectors
+
+    ; There was an intialization error, so we can't continue
+    asksil error_sidecart_comm_msg
+    rts
+
+    endif
+
+_save_vectors:
+    print up_msg
+    print up_msg
+    print boot_up_msg
+    print show_ok_msg
+    print cr
+    print cr
     print save_vectors_msg
 
     bsr save_vectors
     tst.w d0
-    beq.s _init_BPB
+    beq.s _detect_hw_type
  
     asksil error_save_vectors_msg
-    rts
-
-_init_BPB:
-    print ok_msg
-    print setup_BPB_msg
-
-    bsr setBPB
-    tst.w d0
-    beq.s _detect_hw_type
-
-    asksil error_setup_BPB_msg
     rts
 
 _detect_hw_type:
@@ -148,54 +302,23 @@ _detect_hw_type:
 
 _display_buffer_type:
     print ok_msg
-    tst.l BUFFER_TYPE
+    tst.l (SHARED_VARIABLES + (SHARED_VARIABLE_BUFFER_TYPE * 4))
     beq.s _display_diskbuf_buffer_type
     print stack_buffer_msg
-    bra.s _display_boot_enabled
+    bra.s _init_vectors
 _display_diskbuf_buffer_type:
     print dskbuf_buffer_msg
 
-_display_boot_enabled:
-    print ok_msg
-    tst.l BOOT_SECTOR_ENABLED
-    beq.s _display_boot_disabled
-    print boot_sector_enabled_msg
-    bra.s _disable_xbios_trap_countdown
-_display_boot_disabled:
-    print boot_sector_disabled_msg
-
-_disable_xbios_trap_countdown:
-    tst.l XBIOS_ENABLED
-    beq.s _disable_xbios_trap
-    print init_vectors_msg
-    moveq #0, d7
-    bra.s _init_vectors
-_disable_xbios_trap:
-    print not_intercepting_vectors_msg
-    moveq #1, d7
 _init_vectors:
     print ok_msg
     bsr set_new_vectors
 
     print boot_disk_msg
+    print cr
+    print cr
+    print cr
 
     bra boot_disk
-
-; Simple PING command to test the communication between the ATARI ST and the RP2040
-ping:
-    move.w #PING_WAIT_TIME, d2           ; Wait for a while until ping responds
-    lsl.w #2, d2
-_reping:
-    move.w d2, -(sp)                 
-    move.w #CMD_PING,d0              ; Command code PING
-    move.w #0,d1                     ; Payload size is 0 bytes. No payload
-    bsr send_sync_command_to_sidecart
-    move.w (sp)+, d2
-    tst.w d0
-    beq.s _exit_ping
-    dbf d2, _reping
-_exit_ping:
-    rts
 
 ; Save the old vectors and install the new ones
 ; For testing purposes this is also implemented in the ATARI ST side
@@ -214,13 +337,11 @@ save_vectors:
     else
 ; Send the old vectors to the RP2040 side to create the data structure
 ; that will be consumed by the ATARI ST side at boot time.
-        move.w #CMD_SAVE_VECTORS,d0         ; Command code SAVE_VECTORS
-        move.w #16,d1                       ; Payload size is 16 bytes
         move.l hdv_bpb.w,d3                 ; Payload is the old hdv_bpb
         move.l hdv_rw.w,d4                  ; Payload is the old hdv_rw
         move.l hdv_mediach.w,d5             ; Payload is the old hdv_mediach
         move.l XBIOS_trap.w,d6              ; Payload is the old XBIOS_trap
-        bsr send_sync_command_to_sidecart
+        send_sync CMD_SAVE_VECTORS, 16
     endif
 
     rts
@@ -239,47 +360,63 @@ set_new_vectors:
     move.l  #new_hdv_bpb_routine,hdv_bpb.w
     move.l  #new_hdv_rw_routine,hdv_rw.w
     move.l  #new_hdv_mediac_routine,hdv_mediach.w
-    tst.w   d7
-    bne.s  _dont_set_xbios_trap
+    tst.l   (SHARED_VARIABLES + (SVAR_XBIOS_TRAP_ENABLED * 4))  ; 0: XBIOS trap disabled, Not 0: XBIOS trap enabled
+    beq.s _dont_set_xbios_trap 
     move.l  #new_XBIOS_trap_routine,XBIOS_trap.w
 _dont_set_xbios_trap:
     rts
 
-; Call to the Sidecart RP2040 to calculate the BPB of the emulated disk
-    ifeq    _DEBUG
-setBPB:
-        move.w #CMD_SET_BPB,d0              ; Command code SET_BPB
-        move.w #0,d1                        ; Payload size is 0 bytes. No payload
-        bsr send_sync_command_to_sidecart
-        rts
-    endif
-
 boot_disk:
-    clr.w _bootdev.w        ; Set emulated A as bootdevice
-    tst.w _nflops.w         ; Check if there are any floppies attached
-    beq.s _no_floppy_attached
-                            ; At least one floppy is attached
-    move.w #2,_nflops.w     ; Simulate that floppy B is attached (it will be physical A)
+    clr.w _bootdev.w        ; Set emulated A as bootdevice    
+    ; Configure drive A
+    btst   #0, (SHARED_VARIABLES + (SVAR_EMULATION_MODE * 4) + 3) ; Bit 0: Emulate A
+    beq.s _boot_disk_drive_b
+    ; Emulate A
+    tst.w _nflops.w                 ; Check if there are any floppies attached
+    bne.s _boot_disk_drive_a_to_b   ; Since A is emulated and there is a drive, map physical A to B
+    move.l #1,_drvbits.w            ; Create the drive A bit
+    move.w #1,_nflops.w             ; Simulate that floppy A is attached
+    bra.s _boot_disk_drive_b
+_boot_disk_drive_a_to_b:
+    move.l #3, _drvbits.w           ; Enable both drives
+    move.w #2,_nflops.w             ; Simulate that floppy B is attached (it will be physical A)
+
+_boot_disk_drive_b:
+    ; Configure drive B
+    btst   #1, (SHARED_VARIABLES + (SVAR_EMULATION_MODE * 4) + 3) ; Bit 1: Emulate B
+    beq.s _start_boot
+    ; Emulate B
+    tst.w _nflops.w                 ; Check if there are any floppies attached
+    beq.s _boot_disk_drive_b_not_keep_a ; Since B is emulated and there is a drive, Keep A as it is
+    move.l #3,_drvbits.w            ; Create the drive B bit
+    move.w #2,_nflops.w             ; Simulate that floppy B is attached and keep A
     bra.s _start_boot
 
-_no_floppy_attached:
-                            ; If not, simulate only A attached
-    move.l #1,_drvbits.w    ; Create the drive A bit
-    move.w #1,_nflops.w     ; Simulate that floppy A is attached
+_boot_disk_drive_b_not_keep_a:      ; If we are here is because B is emulated and there is no physical drive
+    move.l #2, _drvbits.w           ; Enable both drives
+    move.w #1, _nflops.w            ; Simulate that floppy A is not attached but B is attached
 
     ; load bootsector and execute it if checksum is $1234
 _start_boot:
+; Check if there is drive A
+    btst #0, (_drvbits + 3).w
+    beq.s _dont_boot
+; Check if there is a physical drive A and not boot if so
+    btst   #0, (SHARED_VARIABLES + (SVAR_EMULATION_MODE * 4) + 3) ; Bit 0: Emulate A
+    beq.s _dont_boot
+
 ; Read sectors from the sidecart. Don't use XBIOS call
-    moveq #0, d0
-    moveq #1, d1
-    move.w BPB_data, d2
-    lea $2000,a0            ; Start reading at $2000
-    move.l a0, -(sp)
-    bsr read_sectors_from_sidecart
+
+    moveq #0, d0            ; Start reading at sector 0
+    move.l d0, d4           ; Read from drive A
+    move.l d0, d2           ; clear d2.l 
+    move.w BPB_data_A, d2   ; Sector size of the emulated drive A
+    move.l _membot.w,a0        ; Start reading at $2000
+    bsr read_sector_from_sidecart
 
     ; Test checksum
 
-    move.l (sp)+, a1        ; Start reading at $2000
+    move.l _membot.w,a1        ; Start reading at $2000
     move.l a1,a0
     move.w #255,d1          ; Read 512 bytes
     clr.l d2
@@ -287,7 +424,7 @@ _checksum_loop:             ; Calculate checksum
     add.w (a1)+,d2  
     dbf d1,_checksum_loop
 
-    tst.l BOOT_SECTOR_ENABLED
+    tst.l (SHARED_VARIABLES + (SVAR_BOOT_ENABLED * 4))  ; 0: Boot sector enabled,  Not 0: Boot sector disabled
     bne.s .boot_sector_enabled
     rts
 
@@ -300,27 +437,11 @@ _dont_boot:
     rts
 
 _detect_hw:
-	move.l $5a0.w,d0            ; Check the cookie-jar to know what type of machine we are running on
-	beq _old_hardware           ; No cookie-jar, so it's a TOS <= 1.04
-	movea.l d0,a0               ; Get the address of the cookie-jar
-_loop_cookie:
-	move.l (a0)+,d0             ; The cookie jar value is zero, so old hardware again
-	beq _old_hardware
-	cmp.l #'_MCH',d0            ; Is it the _MCH cookie?
-	beq.s _found_cookie         ; Yes, so we found the machine type
-	addq.w #4,a0                ; No, so skip the cookie name
-	bra.s _loop_cookie          ; And try the next cookie
-_found_cookie:
-	move.l	(a0)+,d3            ; Get the cookie value
-	bra.s	_save_hw
-_old_hardware:
-    clr.l d3                    ; 0x0000	0x0000	Atari ST (260 ST,520 ST,1040 ST,Mega ST,...)
-_save_hw:
-    move.w #CMD_SAVE_HARDWARE,d0        ; Command code SAVE_HARDWARE
-    move.w #12,d1                        ; Payload size is 4 bytes. Payload in d3.l, d4.l and d5.l
+    bsr detect_hw
+    move.l d0, d3                       ; hardware type
     move.l #do_transfer_sidecart, d4    ; Address of the start function to overwrite the speed change
     move.l #exit_transfer_sidecart, d5  ; Address of the end function to overwrite the speed change
-    bsr send_sync_command_to_sidecart
+    send_sync CMD_SAVE_HARDWARE, 12
     rts
 
 ; New hdv_bpb routine
@@ -328,19 +449,33 @@ _save_hw:
 ; While testing the code in the ATARI ST side, first built the BPB in the ATARI ST side
 ; But the final implementation should be in the RP2040 side
 new_hdv_bpb_routine:
-    move.w 4(sp),d0             ; Read the drive doing the stuff
-    cmp.w disk_number,d0        ; Is this the disk_number we are emulating? 
-    beq.s load_emul_bpp         ; If is the disk to emulate, load the BPB built 
-    cmp.b #1,d0                 ; Is it the Drive B?
-    bne.s not_emul_bpp          ; If not, jump to the old routine
-    clr.w 4(sp)                 ; Map B as A
-not_emul_bpp:
+    cmp.w #0,4(sp)              ; Is this the disk_number we are emulating? 
+    beq.s _load_emul_bpp_A      ; If is the disk A to emulate, load the BPB A built 
+    cmp.w #1,4(sp)              ; Is it the Drive B?
+    beq.s _load_emul_bpp_B      ; If is the disk B to emulate, load the BPB B built 
+_not_emul_bpp:
     move.l old_hdv_bpb,-(sp)
     rts
 
-load_emul_bpp:
-    move.l #BPB_data,d0         ; Load the emulated BPP
+_load_emul_bpp_A:
+    ; Test Drive A
+    btst   #0, (SHARED_VARIABLES + (SVAR_EMULATION_MODE * 4) + 3) ; Bit 0: Emulate A
+    beq.s _not_emul_bpp
+    ; Emulate A
+    move.l #BPB_data_A,d0         ; Load the emulated BPP A
     rts  
+
+_load_emul_bpp_B:
+    ; Test Drive B
+    btst   #1, (SHARED_VARIABLES + (SVAR_EMULATION_MODE * 4) + 3) ; Bit 1: Emulate B
+    beq.s _not_emul_bpp_B
+    move.l #BPB_data_B,d0         ; Load the emulated BPP B
+    rts  
+
+_not_emul_bpp_B:
+    clr.w 4(sp)                   ; Map B as A
+    move.l old_hdv_bpb,-(sp)
+    rts
 
 ; New hdv_rw routine
 ; Read/Write the emulated disk if it's drive A or B
@@ -348,14 +483,33 @@ load_emul_bpp:
 ; But the final implementation should read from the RP2040 side thanks to the 
 ; commands sent from the ATARI ST side
 new_hdv_rw_routine:
-    move.w 14(sp),d7            ; Read the drive doing the stuff
-    cmp.w disk_number,d7        ; Is this the disk_number we are emulating?
-    beq.s exe_emul_rw           ; If is the disk to emulate, read/write the emulated disk
-    cmp.b #1,d7                 ; Is it the Drive B?
-    bne.s not_exe_emul_rw       ; If not, jump to the old routine
-    clr.w 14(sp)                ; Map B as A
+    cmp.w #0,14(sp)             ; Is this the disk_number we are emulating?
+    beq.s _exe_emul_rw_A        ; If is the disk A to emulate, read/write the emulated disk
+    cmp.w #1,14(sp)             ; Is it the Drive B?
+    beq.s _exe_emul_rw_B        ; If is the disk B to emulate, read/write the emulated disk
+    move.l old_hdv_rw,-(sp)     ; If is not the disk A or B, restore the old hdv_rw
+    rts
 
-not_exe_emul_rw:
+_exe_emul_rw_A:
+    ; Test Drive A
+    btst   #0, (SHARED_VARIABLES + (SVAR_EMULATION_MODE * 4) + 3) ; Bit 0: Emulate A
+    beq.s _not_emul_rw_A
+    move.w BPB_data_A,d2       ; Sector size of the emulated drive A
+    moveq #0, d4               ; Use A:
+    bra.s exe_emul_rw
+_not_emul_rw_A:
+    move.l old_hdv_rw,-(sp)
+    rts
+
+_exe_emul_rw_B:
+    ; Test Drive B
+    btst   #1, (SHARED_VARIABLES + (SVAR_EMULATION_MODE * 4) + 3) ; Bit 1: Emulate B
+    beq.s _not_emul_rw_B
+    move.w BPB_data_B,d2       ; Sector size of the emulated drive B
+    moveq #1, d4               ; Use B:
+    bra.s exe_emul_rw
+_not_emul_rw_B:
+    clr.w 14(sp)                ; Map B as A
     move.l old_hdv_rw,-(sp)
     rts
 
@@ -363,16 +517,15 @@ exe_emul_rw:
     sf d3                       ; Set FALSE flag for RWABS call
 exe_emul_rw_all:
     tst.l 6(sp)                 ; Check if buffer address is 0
-    beq no_buffer_error         ; just skip by error?
+    beq.s no_buffer_error       ; just skip by error?
 
+    and.l #$0000FFFF,d2         ; limit the size of the sectors to 65535
     moveq #0,d0
     move.l d0,d1
-    move.l d0,d2
-    move.l d0,d4
+    move.l d0,d5
     move.w 12(sp),d0            ; recno, logical sector number
     move.w 10(sp),d1            ; Number of sectors to read/write
-    move.w BPB_data, d2         ; Sector size
-    move.w 4(sp), d4            ; rwflag
+    move.w 4(sp), d5            ; rwflag
     move.l 6(sp), a0            ; Buffer address
 
     ifne _DEBUG
@@ -395,25 +548,36 @@ xbios_exit:
         nf_str read_buff_msg_end_xbios_rw
         nf_crlf
     endif
-    lea 20(sp),sp
-    movem.l (sp)+,d3-d7 
+    lea 52(sp),sp
+    movem.l (sp)+,d1-d7/a1-a6
     rte
 
 ; New hdv_mediac routine
 new_hdv_mediac_routine:
-    move.w 4(sp),d0             ; Read the drive doing the stuff
-    cmp.w disk_number,d0        ; Is this the disk_number we are emulating?
-    beq.s media_changed         ; If is the disk we are emulating, go to media has changed
-    cmp.b #1,d0                 ; Is it the Drive B?
-    bne.s not_emul_media_change ; If not, jump to the old routine
-    clr.w 4(sp)                 ; Map B as A
-
-not_emul_media_change:
+    cmp.w #0,4(sp)              ; Is this the disk_number we are emulating? 
+    beq.s _media_changed_A      ; If is the disk A to emulate, media changed A
+    cmp.w #1,4(sp)              ; Is it the Drive B?
+    beq.s _media_changed_B      ; If is the disk B to emulate, media changed B
+_not_emul_media_change:
     move.l old_hdv_mediach,-(sp)
     rts
 
-media_changed:
-    moveq #0,d0
+_media_changed_A:
+    ; Test Drive A
+    btst   #0, (SHARED_VARIABLES + (SVAR_EMULATION_MODE * 4) + 3) ; Bit 0: Emulate A
+    beq.s _not_emul_media_change
+    move.l (SHARED_VARIABLES + (SVAR_MEDIA_CHANGED_A * 4)),d0
+    rts
+
+_media_changed_B:
+    ; Test Drive B
+    btst   #1, (SHARED_VARIABLES + (SVAR_EMULATION_MODE * 4) + 3) ; Bit 1: Emulate B
+    beq.s _not_emul_media_change_B
+    move.l (SHARED_VARIABLES + (SVAR_MEDIA_CHANGED_B * 4)),d0
+    rts
+_not_emul_media_change_B:
+    clr.w 4(sp)                 ; Map B as A
+    move.l old_hdv_mediach,-(sp)
     rts
 
 ; New XBIOS map A calls to Sidecart,
@@ -422,22 +586,29 @@ media_changed:
 ; contents should not be depended upon at the completion of a call. In addition, the function
 ; opcode placed on the stack will be modified.
 new_XBIOS_trap_routine:
-    move.l sp,a0
-    ;
-    ; Check if the trap was called from user mode or supervisor mode. And correct the stack pointer if needed.
-    ;
-    btst #5,(a0)                    ; check if called from user mode
-    bne.s _not_user                 ; if not, do not correct stack pointer
-    move.l usp,a0                   ; if yes, correct stack pointer
-    subq.l #6,a0                    ; correct stack pointer
-_not_user:
-    ;
-    ; This code checks if the CPU is a 68000 or not
-    ;
-    tst.w $59e
-    beq.s _68000
-    addq.w #2, a0
-_68000:
+    btst #5, (sp)                         ; Check if called from user mode
+    beq.s _user_mode                      ; if so, do correct stack pointer
+_not_user_mode:
+    move.l sp,a0                          ; Move stack pointer to a0
+    bra.s _check_cpu
+_user_mode:
+    move.l usp,a0                          ; if user mode, correct stack pointer
+    subq.l #6,a0
+;
+; This code checks if the CPU is a 68000 or not
+;
+_check_cpu:
+    tst.w _longframe                          ; Check if the CPU is a 68000 or not
+    beq.s _notlong
+_long:
+    addq.w #2, a0                             ; Correct the stack pointer parameters for long frames 
+_notlong:
+
+;   For debugging purposes
+;    movem.l d0-d7/a0-a6,-(sp)
+;    move.w 6(a0), d3                     ; get XBIOS call number
+;    send_sync CMD_SHOW_VECTOR_CALL, 2    ; Send the command to the Sidecart. 2 bytes of payload
+;    movem.l (sp)+, d0-d7/a0-a6
                                     ; get XBIOS call number
     cmp.w #8,6(a0)                  ; is it XBIOS call Flopwr?
     beq.s _floppy_rw                ; if yes, go to flopppy read
@@ -485,17 +656,17 @@ _floppy_format_emulated_a:
     ;
 _floppy_rw:
     cmp.w #1,16(a0)
-    bne.s _floppy_read_emulated_a   ; if is not B then is A
-    clr.w 16(a0)                    ; Map B drive to physical A
+    bne.s _floppy_read_emulated_a     ; if is not B then is A
+    clr.w 16(a0)                      ; Map B drive to physical A
     move.l old_XBIOS_trap, -(sp)      ; continue with XBIOS call
     rts 
 
 _floppy_read_emulated_a:   
-    movem.l d3-d7,-(sp)
-    lea -20(sp),sp                  ; Rewind to the beginning of the stack parameters of the call
+    movem.l d1-d7/a1-a6,-(sp)
+    lea -52(sp),sp                  ; Rewind to the beginning of the stack parameters of the call
     addq.l #6,a0
-    move.l  2(a0),6(sp)             ; buffer -OK
-    move.w 18(a0),10(sp)            ; sector count - OK
+    move.l  2(a0),6(sp)             ; buffer
+    move.w 18(a0),10(sp)            ; sector count
     clr.l d0
     move.w 12(a0),d0                ; start sect no
     subq.w #1,d0                    ; one less because flosector starts  with 1, not 0
@@ -506,14 +677,15 @@ _floppy_read_emulated_a:
     clr.l d2
     move.w 16(a0),d2                ; side no
     clr.l d4
-    mulu secpcyl,d1                 ; sec/track
+    mulu secpcyl_A,d1               ; sec/track
     add.w d1,d0                     ; track no * sec/track + start sect no
 
-    mulu secptrack,d2               ; sec/cyl
+    mulu secptrack_A,d2             ; sec/cyl
     add.w d2,d0                     ; side no * sec/cyl + track no * sec/track + start sect no
     move.w d0,12(sp)                ; logical start sector for read from emulated disk
     move.w #-1, 4(sp)               ; flag for read
     st d3                           ; Set TRUE flag for XBIOS call
+    move.w BPB_data_A, d2           ; Sector size of the emulated drive A
     cmp.w #9,(a0)                   ; is write?
     beq exe_emul_rw_all
     clr.w 4(sp)                     ; No, is read
@@ -525,7 +697,8 @@ _floppy_read_emulated_a:
 ;  d0: logical sector number to start the transfer
 ;  d1: number of sectors to read/write
 ;  d2: sector size in bytes
-;  d4: rwflag for read/write
+;  d4: disk drive number to read (0 = A:, 1 = B:)
+;  d5: rwflag for read/write
 ;  a0: buffer address in the computer memory
 ; Output registers:
 ;  none
@@ -535,7 +708,7 @@ do_transfer_sidecart:
 	and.b #%00000001,$ffff8e21.w     ; disable MSTe cache. 6 BYTES
 	bclr.b #0,$ffff8e21.w            ; set CPU speed at 8mhz. 6 BYTES
     ; END: WE MUST 'NOP' 16 BYTES HERE
-    tst.w d4                    ; test rwflag
+    tst.w d5                    ; test rwflag
     bne write_sidecart          ; if not, write
 read_sidecart:
     move.l a0, a1
@@ -556,6 +729,7 @@ exit_transfer_sidecart:
 ;  d0: logical sector number to start the transfer
 ;  d1: number of sectors to read
 ;  d2: sector size in bytes
+;  d4: disk drive number to read (0 = A:, 1 = B:)
 ;  a0: address in the computer memory to store the data
 ; Output registers:
 ;  d0: error code, 0 if no error
@@ -573,6 +747,7 @@ _sectors_to_read:
 ;  d0: logical sector number to start the transfer
 ;  d1: number of sectors to write
 ;  d2: sector size in bytes
+;  d4: disk drive number to read (0 = A:, 1 = B:)
 ;  a4: address in the computer memory to retrieve the data
 ; Output registers:
 ;  d0: error code, 0 if no error
@@ -580,54 +755,59 @@ _sectors_to_read:
 write_sectors_from_sidecart:
     subq.w #1,d1                ; one less
 _sectors_to_write:
+    move.l d0, -(sp)
     bsr write_sector_to_sidecart
+    tst.w d0
+    bne.s _error_sectors_to_write
+    move.l (sp)+, d0
     addq #1,d0
     dbf d1, _sectors_to_write
+    rts
+_error_sectors_to_write:
+    move.l (sp)+, d0
     rts
 
 ; Read a sector from the sidecart
 ; Input registers:
 ;  d0: logical sector number to start the transfer
 ;  d2: sector size in bytes
+;  d4: disk drive number to read (0 = A:, 1 = B:)
 ;  a0: address in the computer memory to write
 ; Output registers:
 ;  d0: error code, 0 if no error
 ;  a1: next address in the computer memory to store
 read_sector_from_sidecart:
     ; Implement the code to read a sector from the sidecart
-    movem.w d0-d3, -(sp)                ; Save the number of sectors to read
-    move.w d2, d4                       ; Save in d4 the number of bytes to copy
+    movem.w d0-d5, -(sp)                ; Save the number of sectors to read
+    move.w d2, d5                       ; Save in d5 the number of bytes to copy
     move.w d0,d3                        ; Payload is the logical sector number
     swap d3
     move.w d2,d3                        ; Payload is the sector size
-    move.w #CMD_READ_SECTOR,d0          ; Command code READ_SECTOR
-    move.w #4,d1                        ; Payload size is 4 bytes
-    movem.l d4/a0, -(sp)                ; Save the address of the buffer
-    bsr send_sync_command_to_sidecart   ; Call the sync command to read a sector
-    movem.l (sp)+, d4/a0                ; Restore the address of the buffer
+    movem.l d1-d7/a0-a6, -(sp)          ; Save the address of the buffer
+    send_sync CMD_READ_SECTOR, 8
+    movem.l (sp)+, d1-d7/a0-a6          ; Recover the address of the buffer
     tst.w d0
     bne.s _error_reading_sector
 
+    clr.l d0                            ; Clear the error code
     move.l #sidecart_read_buf, a1
-    lsr.w #2, d4
-    subq.w #1,d4                        ; one less
+    lsr.w #2, d5
+    subq.w #1,d5                        ; one less
     move.l a0, d3
     btst #0,d3                          ; If it's even, take the fast lane. If it's odd, take the slow lane
     bne.s _copy_sector_byte_odd
 _copy_sector_byte_even:
     move.l (a1)+, (a0)+
-    dbf d4, _copy_sector_byte_even
-    clr.w d0                    ; Clear the error code
+    dbf d5, _copy_sector_byte_even
 _error_reading_sector:
-    movem.w (sp)+, d0-d3           ; Recover the number of sectors to read
+    movem.w (sp)+, d0-d5           ; Recover the number of sectors to read
     rts
 _copy_sector_byte_odd:
     move.b (a1)+, (a0)+
     move.b (a1)+, (a0)+
     move.b (a1)+, (a0)+
     move.b (a1)+, (a0)+
-    dbf d4, _copy_sector_byte_odd
-    clr.w d0                    ; Clear the error code
+    dbf d5, _copy_sector_byte_odd
     bra.s _error_reading_sector
 
 
@@ -636,333 +816,44 @@ _copy_sector_byte_odd:
 ; Input registers:
 ;  d0: logical sector number to start the transfer
 ;  d2: sector size in bytes
+;  d4: disk drive number to read (0 = A:, 1 = B:)
 ;  a4: address in the computer memory to write
 ; Output registers:
 ;  d0: error code, 0 if no error
 ;  a4: next address in the computer memory to retrieve
 write_sector_to_sidecart:
     ; Implement the code to write a sector to the sidecart
-    movem.w d0-d3, -(sp)                ; Save the number of sectors to read
-    move.w d2, d4                       ; Save in d4 the number of bytes to copy
-    move.w d0,d3                        ; Payload is the logical sector number
+    moveq #WRITE_COMMAND_RETRIES, d7          ; Number of retries 
+_write_sector_to_sidecart_once:
+    movem.l d1-d7/a0-a6, -(sp)                ; Save the address of the buffer
+    move.w d2, d6                             ; argument with the number of bytes to send
+    move.w d0,d3                              ; Payload is the logical sector number
     swap d3
-    move.w d2,d3                        ; Payload is the sector size
-    move.w #CMD_WRITE_SECTOR,d0         ; Command code WRITE_SECTOR
-    move.w d2, d1
-    addq.w #4,d1                        ; Payload size is 4 bytes (d3.l) + the sector buffer size to transfer
-
+    move.w d2,d3                              ; Payload is the sector size
+    move.w #CMD_WRITE_SECTOR,d0               ; Command code WRITE_SECTOR
+    ; We don't set here d1.w with the size of the payload because the sync_write command ALWAYS
+    ; sends the same payload in the d3.l, d4.l and d5.l registers
+    ; So we need to assume in the RP2040 that we have to process or skip these values to read the
+    ; sector buffer data sent with this command
     bsr send_sync_write_command_to_sidecart   ; Call the sync command to read a sector
     tst.w d0
     bne.s _error_writing_sector
-
-    clr.w d0                       ; Clear the error code
+    clr.w d0                                   ; Clear the error code
+    movem.l (sp)+, d1-d7/a0-a6          ; Recover the address of the buffer
+    and.l #$0000FFFF,d2                 ; limit the size of the sectors to 65535
+    add.l d2, a4                        ; Move the address to the next sector
+    rts
 _error_writing_sector:
-    movem.w (sp)+, d0-d3           ; Recover the number of sectors to read
+    movem.l (sp)+, d1-d7/a0-a6               ; Recover the address of the buffer
+    dbf d7, _write_sector_to_sidecart_once   ; Retry the write operation
     rts
 
-; Send an sync command to the Sidecart
-; Wait until the command sets a response in the memory with a random number used as a token
-; Input registers:
-; d0.w: command code
-; d1.w: payload size
-; From d3 to d7 the payload based on the size of the payload field d1.w
-; Output registers:
-; d0: error code, 0 if no error
-; d1-d7 are modified. a0-a3 modified.
-send_sync_command_to_sidecart:
-    move.l (sp)+, a0                 ; Return address
-    move.l #_end_sync_code_in_stack - _start_sync_code_in_stack, d7
-    tst.l BUFFER_TYPE
-    bne.s .send_sync_command_to_sidecart_use_stack_buffer
-    move.l _dskbufp, a2                ; Address of the buffer to send the command
-    bra.s .send_sync_command_to_sidecart_continue
-.send_sync_command_to_sidecart_use_stack_buffer:
-    lea -(_end_sync_code_in_stack - _start_sync_code_in_stack)(sp), sp
-    move.l sp, a2
-.send_sync_command_to_sidecart_continue:
-    move.l a2, a3
-    lea _start_sync_code_in_stack, a1    ; a1 points to the start of the code in ROM
-    lsr.w #2, d7
-    subq #1, d7
-_copy_sync_code:
-    move.l (a1)+, (a2)+
-    dbf d7, _copy_sync_code
-
-    move.l a0, a2                       ; Return address to a2    ; The sync command synchronize with a random token
-
-    ; The sync command synchronize with a random token
-    move.l RANDOM_TOKEN_SEED_ADDR,d2
-    addq.w #4, d1                       ; Add 4 bytes to the payload size to include the token
-
-_start_async_code_in_stack:
-    move.l #ROM3_START_ADDR, a0 ; Start address of the ROM3
-
-    ; SEND HEADER WITH MAGIC NUMBER
-    swap d0                     ; Save the command code in the high word of d0         
-    move.b CMD_MAGIC_NUMBER, d0 ; Command header. d0 is a scratch register
-
-    ; SEND COMMAND CODE
-    swap d0                     ; Recover the command code
-    move.l a0, a1               ; Address of the ROM3
-    add.w d0, a1                ; We can use add because the command code msb is 0 and there is no sign extension            
-    move.b (a1), d0             ; Command code. d0 is a scratch register
-
-    ; SEND PAYLOAD SIZE
-    move.l a0, d0               ; Address of the ROM3 in d0    
-    or.w d1, d0                 ; OR high and low words in d0
-    move.l d0, a1               ; move to a1 ready to read from this address
-    move.b (a1), d0             ; Command payload size. d0 is a scratch register
-    tst.w d1
-    beq _no_more_payload_stack        ; If the command does not have payload, we are done.
-
-    ; SEND PAYLOAD
-    move.l a0, d0
-    or.w d2, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload low d2
-    cmp.w #2, d1
-    beq _no_more_payload_stack
-
-    swap d2
-    move.l a0, d0
-    or.w d2, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload high d2
-    cmp.w #4, d1
-    beq _no_more_payload_stack
-
-    move.l a0, d0
-    or.w d3, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload low d3
-    cmp.w #6, d1
-    beq _no_more_payload_stack
-
-    swap d3
-    move.l a0, d0
-    or.w d3, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload high d3
-    cmp.w #8, d1
-    beq _no_more_payload_stack
-
-    move.l a0, d0
-    or.w d4, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload low d4
-    cmp.w #10, d1
-    beq _no_more_payload_stack
-
-    swap d4
-    move.l a0, d0
-    or.w d4, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload high d4
-    cmp.w #12, d1
-    beq.s _no_more_payload_stack
-
-    move.l a0, d0
-    or.w d5, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload low d5
-    cmp.w #14, d1
-    beq.s _no_more_payload_stack
-
-    swap d5
-    move.l a0, d0
-    or.w d5, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload high d5
-    cmp.w #16, d1
-    beq.s _no_more_payload_stack
-
-    move.l a0, d0
-    or.w d6, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload low d6
-    cmp.w #18, d1
-    beq.s _no_more_payload_stack
-
-    swap d6
-    move.l a0, d0
-    or.w d6, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload high d6
-
-_no_more_payload_stack:
-    swap d2                   ; D2 is the only register that is not used as a scratch register
-    move.l #$000FFFFF, d7     ; Most significant word is the inner loop, least significant word is the outer loop
-    moveq #0, d0              ; Timeout
-    jmp (a3)                  ; Jump to the code in the stack
-; This is the code that cannot run in ROM while waiting for the command to complete
-_start_sync_code_in_stack:
-    cmp.l RANDOM_TOKEN_ADDR, d2              ; Compare the random number with the token
-    beq.s _sync_token_found                  ; Token found, we can finish succesfully
-    subq.l #1, d7                            ; Decrement the inner loop
-    bne.s _start_sync_code_in_stack          ; If the inner loop is not finished, continue
 
 
-    ; Sync token not found, timeout
-    subq.l #1, d0                            ; Timeout
-_sync_token_found:
 
-    move.l #RANDOM_TOKEN_POST_WAIT, d7
-_wait_me:
-    subq.l #1, d7                            ; Decrement the outer loop
-    bne.s _wait_me                           ; Wait for the timeout
-    tst.l BUFFER_TYPE
-    beq.s ._wait_me_restore_dskbuff
-    lea (_end_sync_code_in_stack - _start_sync_code_in_stack)(sp), sp
-._wait_me_restore_dskbuff:
-    jmp (a2)                                 ; Return to the code in the ROM
-
-    even    ; Do not remove this line
-    nop     ; Do not remove this line
-    nop     ; Do not remove this line
-_end_sync_code_in_stack:
-
-; Send an sync write command to the Sidecart
-; Wait until the command sets a response in the memory with a random number used as a token
-; Input registers:
-; d0.w: command code
-; d1.w: payload size
-; d3.l: size sector and logical sector number
-; a4: address of the buffer to write in the sidecart
-; Output registers:
-; d0: error code, 0 if no error
-; a4: next address in the computer memory to retrieve
-; d1-d7 are modified. a0-a3 modified.
-send_sync_write_command_to_sidecart:
-    move.l (sp)+, a0                 ; Return address
-    move.l #_end_sync_write_code_in_stack - _start_sync_write_code_in_stack, d7
-    tst.l BUFFER_TYPE
-    bne.s .send_sync_write_command_to_sidecart_use_stack_buffer
-    move.l _dskbufp, a2                ; Address of the buffer to send the command
-    bra.s .send_sync_write_command_to_sidecart_continue
-.send_sync_write_command_to_sidecart_use_stack_buffer:
-    lea -(_end_sync_write_code_in_stack - _start_sync_write_code_in_stack)(sp), sp
-    move.l sp, a2
-.send_sync_write_command_to_sidecart_continue:
-    move.l a2, a3
-    lea _start_sync_write_code_in_stack, a1    ; a1 points to the start of the code in ROM
-    lsr.w #2, d7
-    subq #1, d7
-_copy_write_sync_code:
-    move.l (a1)+, (a2)+
-    dbf d7, _copy_write_sync_code
-
-    move.l a0, a2                       ; Return address to a2
-
-    ; The sync write command synchronize with a random token
-    move.l RANDOM_TOKEN_SEED_ADDR,d2
-    addq.w #4, d1                       ; Add 4 bytes to the payload size to include the token
-    lsr.w #1, d4                        ; Copy two bytes each iteration
-    subq.w #1, d4                       ; one less
-
-_start_async_write_code_in_stack:
-    move.l #ROM3_START_ADDR, a0 ; We have to keep in A0 the address of the ROM3 because we need to read from it
-
-    ; SEND HEADER WITH MAGIC NUMBER
-    swap d0                     ; Save the command code in the high word of d0         
-    move.b CMD_MAGIC_NUMBER, d0; Command header. d0 is a scratch register
-
-    ; SEND COMMAND CODE
-    swap d0                     ; Recover the command code
-    move.l a0, a1               ; Address of the ROM3
-    add.w d0, a1                ; We can use add because the command code msb is 0 and there is no sign extension            
-    move.b (a1), d0             ; Command code. d0 is a scratch register
-
-    ; SEND PAYLOAD SIZE
-    move.l a0, d0               ; Address of the ROM3 in d0    
-    or.w d1, d0                 ; OR high and low words in d0
-    move.l d0, a1               ; move to a1 ready to read from this address
-    move.b (a1), d0             ; Command payload size. d0 is a scratch register
-
-    ; SEND PAYLOAD
-    move.l a0, d0
-    or.w d2, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload low d2
-
-    swap d2
-    move.l a0, d0
-    or.w d2, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload high d2
-
-    move.l a0, d0
-    or.w d3, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload low d3
-
-    swap d3
-    move.l a0, d0
-    or.w d3, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Command payload high d3
-
-    ; SEND MEMORY BUFFER TO WRITE
- 
-
-    ; Test if the address in A4 is even or odd
-    move.l a4, d0
-    btst #0, d0
-    beq.s _write_to_sidecart_even_loop
-_write_to_sidecart_odd_loop:
-    move.b  (a4)+, d3       ; Load the high byte
-    lsl.w   #8, d3          ; Shift it to the high part of the word
-    move.b  (a4)+, d3       ; Load the low byte
-    move.l a0, d0
-    or.w d3, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Write the memory to the sidecart
-    dbf d4, _write_to_sidecart_odd_loop
-    bra.s _write_to_sidecart_end_loop
-
- _write_to_sidecart_even_loop:
-    move.w (a4)+, d3        ; Load the word
-    move.l a0, d0
-    or.w d3, d0
-    move.l d0, a1
-    move.b (a1), d0           ; Write the memory to the sidecart
-    dbf d4, _write_to_sidecart_even_loop
-
-_write_to_sidecart_end_loop:
-    ; End of the command loop. Now we need to wait for the token
-    swap d2                   ; D2 is the only register that is not used as a scratch register
-    move.l #$000FFFFF, d7     ; Most significant word is the inner loop, least significant word is the outer loop
-    moveq #0, d0              ; Timeout
-    jmp (a3)                  ; Jump to the code in the stack
-
-; This is the code that cannot run in ROM while waiting for the command to complete
-_start_sync_write_code_in_stack:
-    cmp.l RANDOM_TOKEN_ADDR, d2                    ; Compare the random number with the token
-    beq.s _sync_write_token_found                  ; Token found, we can finish succesfully
-    subq.l #1, d7                                  ; Decrement the inner loop
-    bne.s _start_sync_write_code_in_stack          ; If the inner loop is not finished, continue
-
-    ; Sync token not found, timeout
-    subq.l #1, d0                                  ; Timeout
-
-_sync_write_token_found:
-
-    move.l #RANDOM_TOKEN_POST_WAIT, d7
-_wait_me_write:
-    subq.l #1, d7                            ; Decrement the outer loop
-    bne.s _wait_me_write                     ; Wait for the timeout
-
-    tst.l BUFFER_TYPE
-    beq.s ._wait_me_write_restore_dskbuff
-    lea (_end_sync_write_code_in_stack - _start_sync_write_code_in_stack)(sp), sp
-._wait_me_write_restore_dskbuff:
-    jmp (a2)                                 ; Return to the code in the ROM
-
-    even    ; Do not remove this line
-    nop     ; Do not remove this line
-    nop     ; Do not remove this line
-_end_sync_write_code_in_stack:
-
-
+; Shared functions included at the end of the file
+; Don't forget to include the macros for the shared functions at the top of file
+    include "inc/sidecart_functions.s"
 
 
 floppy_emulator_msg:
@@ -979,58 +870,93 @@ version:
         dc.b    $d,$a
 
 spacing:
-        dc.b    "+" ,$d,$a,0
+        dc.b    $d,$a,0
+
+cr:
+        dc.b    $d,$a,27,"K", 0
 
 loading_image_msg:
-        dc.b	"+- Loading the image...", 0
+        dc.b	"[..] Initializing. Press key to toogle.", $d, $a, $a, 0
 
 error_sidecart_comm_msg:
-        dc.b	$d, $a, "Communication error. Reset!",$d,$a,0
+        dc.b	$d, 27, "KCouldn't initialize. Firmware not ready",$d,$a,0
+
+xbios_params_msg:
+        dc.b	27, "K[X]BIOS trap is ", 0
+
+boot_params_msg:
+        dc.b	27, "K[B]oot sector is ", 0
+
+memory_buff_msg:
+        dc.b	27, "KBuffer [M]emory type: ", 0
+
+memory_buff_stack_msg:
+        dc.b	"HEAP",$d,$a,0
+
+memory_buff_dskbuf_msg:
+        dc.b	"_DSKBUF",$d,$a,0
+
+boot_wait_msg:
+        dc.b	$a, 27, "KConfiguring... Please wait...",$d,$a,$a,0
+
+boot_ready_msg: 
+        dc.b    $a, 27, "KEmulator ready.",$d,$a,$a,0
+
+on_msg:
+        dc.b	"ON ",$d,$a,0
+
+off_msg:
+        dc.b	"OFF",$d,$a,0
+
+boot_countdown_msg:
+        dc.b	27, "KPress [ESC] to boot now, or wait ", 0
+
+boot_countdown_secs_msg:
+        dc.b	"s.", 0
+
+boot_up_msg:
+        dc.b    27, "A",27, "A", 27, "A",27, "A", 27, "A", 27, "A", 27, "A", 27, "A", 27, "A",  13, 0
+up_msg:
+        dc.b	 27, "A", 0
+
+show_ok_msg:
+        dc.b	27, "K[OK] Initialized",$d,$a,0
 
 detect_hardware_msg:
-        dc.b	"+- Detecting hardware...", 0
+        dc.b	$d, "[..] Detecting hardware...", 0
 
 error_detect_hardware_msg:
-        dc.b	$d, $a, "Error detecting hardware",$d,$a,0
+        dc.b	$d, "[KO] Error detecting hardware",$d,$a,0
  
 save_vectors_msg:
-        dc.b	"+- Saving the old vectors...", 0
+        dc.b	"[..] Saving the old vectors...", 0
 
 error_save_vectors_msg:
-        dc.b	$d, $a, "Error saving the old vectors",$d,$a,0
-
-setup_BPB_msg:
-        dc.b	"+- Setting BPB of the emulated disk...",0
-
-error_setup_BPB_msg:
-        dc.b	$d, $a, "Error setting BPB of the emulated disk",$d,$a,0
+        dc.b	$d, "[KO] Error saving the old vectors",$d,$a,0
 
 stack_buffer_msg:
-        dc.b	"+- Using stack as temp buffer...",0
+        dc.b	"[..] Using stack as temp buffer...",0
 
 dskbuf_buffer_msg:
-        dc.b	"+- Using _dskbuf as temp buffer...",0
-
-boot_sector_disabled_msg:
-        dc.b	"+- Boot sector execution... DISABLED",$d,$a,0
-
-boot_sector_enabled_msg:
-        dc.b	"+- Boot sector execution... ENABLED",$d,$a,0
-
-init_vectors_msg:
-        dc.b	"+- Intercepting XBIOS trap...",0
-
-not_intercepting_vectors_msg:
-        dc.b	"+- Bypassing XBIOS trap...",0
+        dc.b	"[..] Using _dskbuf as temp buffer...",0
 
 boot_disk_msg:
-        dc.b	"+- Booting emulated disk...",$d,$a,0
+        dc.b	"[..] Booting emulated disk...",$d,$a,0
+
+web_ip_msg:
+        dc.b	27, "KConnect to http://",0
+
+web_host_msg:
+        dc.b	" or",$d, $a, 27, "Khttp://",0
+
+web_drive_msg:
+        dc.b	" to manage drives.",0
 
 backwards_msg:
         dc.b    $8, $8,0
 
 ok_msg:
-        dc.b	"OK",$d,$a,0
+        dc.b	$d, "[OK]",$d,$a,0
 
 countdown:
 	dc.b "5",8,0
