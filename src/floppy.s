@@ -229,7 +229,7 @@ _ping_configuration_ready:
 
 _ping_check_boot:
     cmp.b #'b', d0                  ; Check if 'b' is pressed otherwise continue
-    bne.s _ping_check_mem_type
+    bne.s _ping_check_continue_keys
 
     ; Toogle the BOOT trap
     move.l #SVAR_BOOT_ENABLED, d3
@@ -238,15 +238,13 @@ _ping_check_boot:
     send_sync CMD_SET_SHARED_VAR, 8
     bra.s _ping_ok
 
-_ping_check_mem_type:
-    cmp.b #'m', d0                  ; Check if 'm' is pressed otherwise continue
-    bne.s _ping_check_esc
+_ping_check_continue_keys:
+    tst.l (SHARED_VARIABLES + (SVAR_PING_STATUS * 4))
+    beq.s _ping_check_esc
 
-    ; Toogle the Memory buffer type
-    move.l #SHARED_VARIABLE_BUFFER_TYPE, d3
-    move.l (SHARED_VARIABLES + (SHARED_VARIABLE_BUFFER_TYPE * 4)), d4
-    not.l d4
-    send_sync CMD_SET_SHARED_VAR, 8
+_ping_check_space:
+    cmp.b #32,d0                    ; Check if SPACE is pressed and continue
+    beq.s _ping_check_final_status
     bra.s _ping_ok
 
 _ping_check_esc:
@@ -889,7 +887,7 @@ boot_params_msg:
         dc.b	27, "K[B]oot sector is ", 0
 
 memory_buff_msg:
-        dc.b	27, "KBuffer [M]emory type: ", 0
+        dc.b	27, "KBuffer Memory type: ", 0
 
 memory_buff_stack_msg:
         dc.b	"HEAP",$d,$a,0
@@ -910,7 +908,7 @@ off_msg:
         dc.b	"OFF",$d,$a,0
 
 boot_countdown_msg:
-        dc.b	27, "KPress [ESC] to boot now, or wait ", 0
+        dc.b	27, "KPress [SPACE] to boot now, or wait ", 0
 
 boot_countdown_secs_msg:
         dc.b	"s.", 0
