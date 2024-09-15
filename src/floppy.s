@@ -826,6 +826,7 @@ write_sector_to_sidecart:
     moveq #WRITE_COMMAND_RETRIES, d7          ; Number of retries 
 _write_sector_to_sidecart_once:
     movem.l d1-d7/a0-a6, -(sp)                ; Save the address of the buffer
+    moveq.l #0, d6                              ; Number of bytes to send
     move.w d2, d6                             ; argument with the number of bytes to send
     move.w d0,d3                              ; Payload is the logical sector number
     swap d3
