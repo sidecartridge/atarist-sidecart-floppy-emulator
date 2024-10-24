@@ -149,7 +149,6 @@ _reset_bypass:
     print loading_image_msg
     move.l (SHARED_VARIABLES + (SVAR_PING_TIMEOUT * 4))  , d7      ; retries of the ping command
 _ping_retry:
-
     print xbios_params_msg
     tst.l (SHARED_VARIABLES + (SVAR_XBIOS_TRAP_ENABLED * 4))       ; 0: XBIOS trap disabled, Not 0: XBIOS trap enabled 
     beq.s _ping_disable_xbios_trap
@@ -177,7 +176,7 @@ _ping_memory_buff_diskbuf:
     print memory_buff_dskbuf_msg
 
 _ping_web:
-    tst.b IP_ADDRESS
+    tst.l IP_ADDRESS
     beq.s _ping_noweb
     print cr
     print web_ip_msg
